@@ -68,7 +68,8 @@ def create_app(settings: Settings):
 
         task = asyncio.create_task(refresh())
         try:
-            yield {}
+            async with mcp.session_manager.run():
+                yield
         finally:
             task.cancel()
             try:
@@ -81,7 +82,6 @@ def create_app(settings: Settings):
         instructions=INSTRUCTIONS,
         stateless_http=True,
         json_response=True,
-        lifespan=lifespan,
         transport_security=TransportSecuritySettings(
             enable_dns_rebinding_protection=True,
             allowed_hosts=settings.allowed_hosts,
@@ -174,7 +174,11 @@ def create_app(settings: Settings):
 
         return await asyncio.to_thread(status)
 
-    return BearerMiddleware(mcp.streamable_http_app(), token)
+    app = mcp.streamable_http_app()
+    # Stateless MCP lifespans run for every request. Recovery and indexing
+    # belong to the HTTP server lifetime, alongside the session manager.
+    app.router.lifespan_context = lifespan
+    return BearerMiddleware(app, token)
 
 
 def serve(settings):

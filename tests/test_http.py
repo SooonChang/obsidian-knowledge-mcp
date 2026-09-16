@@ -9,11 +9,31 @@ import uvicorn
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
+from knowledge_mcp.knowledge import Knowledge
 from knowledge_mcp.server import create_app
+from knowledge_mcp.storage import Store
 
 
 @pytest.fixture
-def endpoint(store, monkeypatch):
+def lifecycle_calls(monkeypatch):
+    calls = {"recover": 0, "reindex": 0}
+    recover, reindex = Knowledge.recover, Store.reindex
+
+    def counted_recover(self):
+        calls["recover"] += 1
+        return recover(self)
+
+    def counted_reindex(self, *args, **kwargs):
+        calls["reindex"] += 1
+        return reindex(self, *args, **kwargs)
+
+    monkeypatch.setattr(Knowledge, "recover", counted_recover)
+    monkeypatch.setattr(Store, "reindex", counted_reindex)
+    return calls
+
+
+@pytest.fixture
+def endpoint(store, monkeypatch, lifecycle_calls):
     token = "test-token-" + "x" * 40
     monkeypatch.setenv("KNOWLEDGE_TOKEN", token)
     with socket.socket() as sock:
@@ -35,6 +55,23 @@ def endpoint(store, monkeypatch):
     server.should_exit = True
     thread.join(10)
     assert not thread.is_alive()
+
+
+async def test_initialization_runs_once_across_concurrent_requests(endpoint, lifecycle_calls):
+    url, token = endpoint
+    assert lifecycle_calls == {"recover": 1, "reindex": 1}
+
+    async def connect():
+        async with httpx.AsyncClient(headers={"Authorization": "Bearer " + token}) as http:
+            async with streamable_http_client(url, http_client=http) as (read, write, _):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    assert len((await session.list_tools()).tools) == 8
+                    result = await session.call_tool("get_status")
+                    assert not result.isError
+
+    await asyncio.wait_for(asyncio.gather(*(connect() for _ in range(3))), timeout=10)
+    assert lifecycle_calls == {"recover": 1, "reindex": 1}
 
 
 async def test_two_mcp_clients_search_save_read(endpoint, request_data):
