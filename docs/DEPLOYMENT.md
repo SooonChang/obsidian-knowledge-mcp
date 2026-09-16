@@ -4,6 +4,7 @@
 
 64비트 Linux와 Docker Engine/Compose를 사용합니다. ARM64와 AMD64는 같은 소스를 각각 빌드합니다.
 모델 변환은 별도 PC에서 수행할 수 있습니다. 최초 기본 검색에는 모델이 필요 없습니다.
+의미 검색을 사용할 새 서버는 [모델 설치 가이드](MODEL_INSTALL.md)를 먼저 확인하세요.
 
 서버에 아래 전용 경로를 만들고 실행 UID/GID가 필요한 경로에만 쓸 수 있도록 소유권을 지정합니다.
 
@@ -20,7 +21,7 @@
 ## 설정
 
 1. 프로젝트의 .env.example → .env, config.example.toml → config.toml로 복사합니다.
-2. .env의 경로와 APP_UID/APP_GID를 실제 서버에 맞춥니다.
+2. .env의 경로와 APP_UID/APP_GID를 실제 서버에 맞춥니다. COMPOSE_FILE이 설정되어 있다면 compose.yaml을 가리키도록 합니다.
 3. config.toml의 source_sync.remote를 실제 S3 rclone remote와 vault prefix로 지정합니다.
 4. secrets/mcp_token에는 무작위 토큰을 저장합니다. 예: python -c 'import secrets; print(secrets.token_urlsafe(48))'
 5. secrets/git_key와 검증한 SSH 호스트 키인 secrets/known_hosts를 준비합니다. StrictHostKeyChecking을 끄지 않습니다.
@@ -28,7 +29,7 @@
 
 ## Remotely Save 원문 최신화
 
-이 사용자 환경에서는 Remotely Save 0.5.25, serviceType=s3, 암호화 비밀번호 없음이 확인되었습니다.
+아래 예시는 Remotely Save가 암호화하지 않은 원문을 S3에 저장하는 구성입니다. 사용 중인 저장 방식과 암호화 여부를 먼저 확인합니다.
 플러그인의 설정 파일 자체는 서버나 Git에 복사하지 않습니다.
 S3 endpoint·region·bucket·prefix를 확인한 뒤 별도 목록 조회/다운로드 전용 자격증명을 발급합니다.
 AWS 기준 s3:ListBucket, s3:GetObject만 필요합니다. S3 호환 서비스에서는 같은 범위의 권한을 적용합니다.
@@ -67,6 +68,12 @@ OpenSSL 포맷을 rclone crypt로 오인하거나 자동 변환하지 않습니�
     docker compose run --rm sync --config /config/config.toml git-init
     docker compose up -d
     docker compose logs --tail 80
+
+의미 검색 모델과 설정까지 준비했다면 시작 명령 대신 다음을 사용합니다. MCP·동기화 작업자·의미 검색을 함께 실행합니다.
+
+    docker compose --profile semantic up -d --build
+
+아래 브랜치 관리는 위키 저장소의 전용 checkout에만 적용되며 MCP 코드 저장소의 브랜치와는 무관합니다.
 
 git-init은 깨끗한 checkout에서만 codex/wiki-memory를 선택하거나 origin/main으로부터 생성합니다.
 서버는 저장된 문서를 전용 브랜치에 commit/push합니다. 사용자 PC main 반영은 사용자가 별도로 병합합니다.

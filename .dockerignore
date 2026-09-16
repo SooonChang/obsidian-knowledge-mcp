@@ -10,3 +10,4 @@ secrets
 .env
 config.toml
 docs
+config.local.toml
