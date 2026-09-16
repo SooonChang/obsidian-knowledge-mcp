@@ -1,0 +1,25 @@
+# Copy outside your vault as config.toml. Relative paths resolve against this file.
+wiki_root = "/vaults/AI-Agent-Wiki"
+data_dir = "/data"
+snapshot_dir = "/sources"
+host = "0.0.0.0" # Container only; Compose publishes to host loopback.
+port = 8765
+allowed_hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
+allowed_origins = []
+
+[source_sync]
+enabled = true
+remote = "notes:bucket-name/vault-prefix"
+
+[git]
+enabled = true
+branch = "codex/wiki-memory"
+
+[semantic]
+enabled = false
+model_dir = "/models/e5-small"
+url = "http://semantic:8766"
+host = "0.0.0.0"
+port = 8766
+threads = 2
+timeout_seconds = 5

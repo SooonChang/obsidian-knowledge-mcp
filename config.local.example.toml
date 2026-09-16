@@ -1,0 +1,22 @@
+# Optional Windows local operation. Copy to config.local.toml and review before starting.
+wiki_root = "C:/soon/obsidian_vault/AI-Agent-Wiki"
+data_dir = "./data"
+host = "127.0.0.1"
+port = 8765
+allowed_hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
+
+# snapshot_dir omitted: source_root comes from the wiki's configuration.
+[source_sync]
+enabled = false
+
+[git]
+enabled = false
+
+[semantic]
+enabled = false
+model_dir = "./models/e5-small"
+url = "http://127.0.0.1:8766"
+host = "127.0.0.1"
+port = 8766
+threads = 2
+timeout_seconds = 5

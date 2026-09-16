@@ -1,0 +1,257 @@
+{
+  "keyword": {
+    "recall_at_10": 0.2,
+    "median_seconds": 0.013501399953383952,
+    "p95_seconds": 0.050235040084226246,
+    "details": [
+      {
+        "query": "������ API�� �ٽ� ȣ���� �� ������ ��� ������?",
+        "hit": false,
+        "mode_used": "keyword",
+        "seconds": 0.022285400074906647
+      },
+      {
+        "query": "���񽺸� ������ �ʰ� ���̺� ������ �ٲٴ� ���",
+        "hit": false,
+        "mode_used": "keyword",
+        "seconds": 0.006617899984121323
+      },
+      {
+        "query": "������ ���� �ٲ���µ� ȭ�鿡�� ���� �����Ͱ� ���´�",
+        "hit": true,
+        "mode_used": "keyword",
+        "seconds": 0.013645599945448339
+      },
+      {
+        "query": "� ���񽺰� �ߴܵǸ� ���� ���� �ؾ� �� ��",
+        "hit": false,
+        "mode_used": "keyword",
+        "seconds": 0.01335209992248565
+      },
+      {
+        "query": "���ᰡ �ۼ��� �ҽ� ������ �����ϴ� ����",
+        "hit": true,
+        "mode_used": "keyword",
+        "seconds": 0.013157199951820076
+      },
+      {
+        "query": "ù ��ÿ��� ����� ��� �þ�� ���� ��������",
+        "hit": false,
+        "mode_used": "keyword",
+        "seconds": 0.009074499947018921
+      },
+      {
+        "query": "�� �� ����� �����ߴ��� ���߿� �����ϰ� �ʹ�",
+        "hit": false,
+        "mode_used": "keyword",
+        "seconds": 0.30266789998859167
+      },
+      {
+        "query": "�ٸ� ����� �� ������Ʈ�� �̾ �����ϰ� �Ϸ���",
+        "hit": false,
+        "mode_used": "keyword",
+        "seconds": 0.021522300085052848
+      },
+      {
+        "query": "�� ȸ�Ǹ� ª�� ȿ�������� �����ϴ� ���",
+        "hit": false,
+        "mode_used": "keyword",
+        "seconds": 0.007126100012101233
+      },
+      {
+        "query": "�ؾ� �� ���� ���� �� �������� ó���ұ�",
+        "hit": false,
+        "mode_used": "keyword",
+        "seconds": 0.017245299997739494
+      },
+      {
+        "query": "�� ����� ȿ���� ���������� Ȯ���Ϸ���",
+        "hit": false,
+        "mode_used": "keyword",
+        "seconds": 0.007956900051794946
+      },
+      {
+        "query": "���� ������ �ݺ��ؼ� �����ָ� ������ ��� �޶�����",
+        "hit": false,
+        "mode_used": "keyword",
+        "seconds": 0.00927179993595928
+      },
+      {
+        "query": "ȭ���� ���� ��ưų� ���콺�� ���� ���ϴ� ����ڸ� ���� UI",
+        "hit": false,
+        "mode_used": "keyword",
+        "seconds": 0.01053430000320077
+      },
+      {
+        "query": "������ �Ҿ������ ������ �ٽ� ������ �� �ְ� �غ��ϱ�",
+        "hit": false,
+        "mode_used": "keyword",
+        "seconds": 0.036949100089259446
+      },
+      {
+        "query": "���� �ڰ������� �ڵ� ����ҿ� �ö󰡴� ���� ���� ���",
+        "hit": true,
+        "mode_used": "keyword",
+        "seconds": 0.025298100081272423
+      },
+      {
+        "query": "���� �˻��� �ʿ��� ������ �� ã���� ���Ϸ���",
+        "hit": true,
+        "mode_used": "keyword",
+        "seconds": 0.030640300014056265
+      },
+      {
+        "query": "���� �ۼ��� ���� �޸� AI�� ����� �ʰ� �Ϸ���",
+        "hit": false,
+        "mode_used": "keyword",
+        "seconds": 0.015418200055137277
+      },
+      {
+        "query": "�� ������Ʈ�� ���� ������ ���ÿ� ��ĥ �� ��ȣ�ϴ� ���",
+        "hit": false,
+        "mode_used": "keyword",
+        "seconds": 0.03677799995057285
+      },
+      {
+        "query": "�ű� ������Ʈ�� �ʿ��� ���� ��� ����ұ�",
+        "hit": false,
+        "mode_used": "keyword",
+        "seconds": 0.01275670004542917
+      },
+      {
+        "query": "���� ���� �� ���� �Ǽ��� �ݺ����� �ʱ� ���� Ȱ��",
+        "hit": false,
+        "mode_used": "keyword",
+        "seconds": 0.013357199961319566
+      }
+    ]
+  },
+  "hybrid": {
+    "recall_at_10": 0.85,
+    "median_seconds": 0.7672680499963462,
+    "p95_seconds": 0.964812244992936,
+    "details": [
+      {
+        "query": "������ API�� �ٽ� ȣ���� �� ������ ��� ������?",
+        "hit": true,
+        "mode_used": "hybrid",
+        "seconds": 0.9771726001054049
+      },
+      {
+        "query": "���񽺸� ������ �ʰ� ���̺� ������ �ٲٴ� ���",
+        "hit": true,
+        "mode_used": "hybrid",
+        "seconds": 0.8512825999641791
+      },
+      {
+        "query": "������ ���� �ٲ���µ� ȭ�鿡�� ���� �����Ͱ� ���´�",
+        "hit": true,
+        "mode_used": "hybrid",
+        "seconds": 0.8124782000668347
+      },
+      {
+        "query": "� ���񽺰� �ߴܵǸ� ���� ���� �ؾ� �� ��",
+        "hit": true,
+        "mode_used": "hybrid",
+        "seconds": 0.8141226000152528
+      },
+      {
+        "query": "���ᰡ �ۼ��� �ҽ� ������ �����ϴ� ����",
+        "hit": true,
+        "mode_used": "hybrid",
+        "seconds": 0.76118030003272
+      },
+      {
+        "query": "ù ��ÿ��� ����� ��� �þ�� ���� ��������",
+        "hit": true,
+        "mode_used": "hybrid",
+        "seconds": 0.7689633000409231
+      },
+      {
+        "query": "�� �� ����� �����ߴ��� ���߿� �����ϰ� �ʹ�",
+        "hit": false,
+        "mode_used": "hybrid",
+        "seconds": 0.9641616999870166
+      },
+      {
+        "query": "�ٸ� ����� �� ������Ʈ�� �̾ �����ϰ� �Ϸ���",
+        "hit": false,
+        "mode_used": "hybrid",
+        "seconds": 0.7561373999342322
+      },
+      {
+        "query": "�� ȸ�Ǹ� ª�� ȿ�������� �����ϴ� ���",
+        "hit": true,
+        "mode_used": "hybrid",
+        "seconds": 0.7733205000404269
+      },
+      {
+        "query": "�ؾ� �� ���� ���� �� �������� ó���ұ�",
+        "hit": true,
+        "mode_used": "hybrid",
+        "seconds": 0.7430043000495061
+      },
+      {
+        "query": "�� ����� ȿ���� ���������� Ȯ���Ϸ���",
+        "hit": false,
+        "mode_used": "hybrid",
+        "seconds": 0.7501832999987528
+      },
+      {
+        "query": "���� ������ �ݺ��ؼ� �����ָ� ������ ��� �޶�����",
+        "hit": true,
+        "mode_used": "hybrid",
+        "seconds": 0.774071600055322
+      },
+      {
+        "query": "ȭ���� ���� ��ưų� ���콺�� ���� ���ϴ� ����ڸ� ���� UI",
+        "hit": true,
+        "mode_used": "hybrid",
+        "seconds": 0.7582572000101209
+      },
+      {
+        "query": "������ �Ҿ������ ������ �ٽ� ������ �� �ְ� �غ��ϱ�",
+        "hit": true,
+        "mode_used": "hybrid",
+        "seconds": 0.7511500000255182
+      },
+      {
+        "query": "���� �ڰ������� �ڵ� ����ҿ� �ö󰡴� ���� ���� ���",
+        "hit": true,
+        "mode_used": "hybrid",
+        "seconds": 0.7695056999800727
+      },
+      {
+        "query": "���� �˻��� �ʿ��� ������ �� ã���� ���Ϸ���",
+        "hit": true,
+        "mode_used": "hybrid",
+        "seconds": 0.7873105999315158
+      },
+      {
+        "query": "���� �ۼ��� ���� �޸� AI�� ����� �ʰ� �Ϸ���",
+        "hit": true,
+        "mode_used": "hybrid",
+        "seconds": 0.7503798000980169
+      },
+      {
+        "query": "�� ������Ʈ�� ���� ������ ���ÿ� ��ĥ �� ��ȣ�ϴ� ���",
+        "hit": true,
+        "mode_used": "hybrid",
+        "seconds": 0.7655727999517694
+      },
+      {
+        "query": "�ű� ������Ʈ�� �ʿ��� ���� ��� ����ұ�",
+        "hit": true,
+        "mode_used": "hybrid",
+        "seconds": 0.752063799998723
+      },
+      {
+        "query": "���� ���� �� ���� �Ǽ��� �ݺ����� �ʱ� ���� Ȱ��",
+        "hit": true,
+        "mode_used": "hybrid",
+        "seconds": 0.7397694999817759
+      }
+    ]
+  },
+  "peak_rss_kib_linux": null
+}

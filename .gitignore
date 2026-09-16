@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+.env
+config.toml
+config.local.toml
+data/
+models/
+secrets/
+*.db*
+*.log
+.test-artifacts/

@@ -1,0 +1,84 @@
+services:
+  mcp:
+    build:
+      context: .
+      target: runtime
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    ports: ["127.0.0.1:8765:8765"]
+    environment:
+      KNOWLEDGE_TOKEN_FILE: /run/secrets/mcp_token
+    volumes:
+      - ${CONFIG_FILE:-./config.toml}:/config/config.toml:ro
+      - ${WIKI_DIR:?Set WIKI_DIR to a dedicated server checkout}:/vaults/AI-Agent-Wiki
+      - ${SOURCE_DIR:?Set SOURCE_DIR to a dedicated snapshot directory}:/sources:ro
+      - ${DATA_DIR:?Set DATA_DIR}:/data
+    secrets: [mcp_token]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks: [knowledge]
+
+  sync:
+    build:
+      context: .
+      target: runtime
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    command: ["--config", "/config/config.toml", "worker"]
+    environment:
+      RCLONE_CONFIG: /run/secrets/rclone_config
+      GIT_SSH_COMMAND: "ssh -i /run/secrets/git_key -o UserKnownHostsFile=/run/secrets/known_hosts -o StrictHostKeyChecking=yes"
+    volumes:
+      - ${CONFIG_FILE:-./config.toml}:/config/config.toml:ro
+      - ${WIKI_DIR}:/vaults/AI-Agent-Wiki
+      - ${SOURCE_DIR}:/sources
+      - ${DATA_DIR}:/data
+    secrets: [rclone_config, git_key, known_hosts]
+    networks: [knowledge]
+
+  semantic:
+    profiles: ["semantic"]
+    build:
+      context: .
+      target: semantic
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    mem_limit: 3g
+    cpus: 2
+    environment:
+      KNOWLEDGE_TOKEN_FILE: /run/secrets/mcp_token
+    volumes:
+      - ${CONFIG_FILE:-./config.toml}:/config/config.toml:ro
+      - ${WIKI_DIR}:/vaults/AI-Agent-Wiki:ro
+      - ${SOURCE_DIR}:/sources:ro
+      - ${DATA_DIR}:/data
+      - ${MODEL_DIR:-./models}:/models:ro
+    secrets: [mcp_token]
+    networks: [knowledge]
+
+secrets:
+  mcp_token:
+    file: ${SECRETS_DIR:?Set SECRETS_DIR}/mcp_token
+  rclone_config:
+    file: ${SECRETS_DIR}/rclone.conf
+  git_key:
+    file: ${SECRETS_DIR}/git_key
+  known_hosts:
+    file: ${SECRETS_DIR}/known_hosts
+networks:
+  knowledge:

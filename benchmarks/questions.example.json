@@ -1,0 +1,122 @@
+[
+  {
+    "query": "실패한 API를 다시 호출할 때 간격을 어떻게 정하지?",
+    "expected": [
+      "source:retry.md"
+    ]
+  },
+  {
+    "query": "서비스를 멈추지 않고 테이블 구조를 바꾸는 방법",
+    "expected": [
+      "source:database.md"
+    ]
+  },
+  {
+    "query": "저장한 값이 바뀌었는데 화면에는 예전 데이터가 나온다",
+    "expected": [
+      "source:cache.md"
+    ]
+  },
+  {
+    "query": "운영 서비스가 중단되면 가장 먼저 해야 할 일",
+    "expected": [
+      "source:incident.md"
+    ]
+  },
+  {
+    "query": "동료가 작성한 소스 변경을 검토하는 기준",
+    "expected": [
+      "source:review.md"
+    ]
+  },
+  {
+    "query": "첫 출시에서 기능이 계속 늘어나는 것을 막으려면",
+    "expected": [
+      "source:scope.md"
+    ]
+  },
+  {
+    "query": "왜 이 방식을 선택했는지 나중에 추적하고 싶다",
+    "expected": [
+      "source:decision.md"
+    ]
+  },
+  {
+    "query": "다른 사람이 내 프로젝트를 이어서 진행하게 하려면",
+    "expected": [
+      "source:handoff.md"
+    ]
+  },
+  {
+    "query": "팀 회의를 짧고 효과적으로 진행하는 방법",
+    "expected": [
+      "source:meeting.md"
+    ]
+  },
+  {
+    "query": "해야 할 일이 많을 때 무엇부터 처리할까",
+    "expected": [
+      "source:priority.md"
+    ]
+  },
+  {
+    "query": "새 기능의 효과를 객관적으로 확인하려면",
+    "expected": [
+      "source:experiment.md"
+    ]
+  },
+  {
+    "query": "같은 광고를 반복해서 보여주면 성과가 어떻게 달라질까",
+    "expected": [
+      "source:frequency.md"
+    ]
+  },
+  {
+    "query": "화면을 보기 어렵거나 마우스를 쓰지 못하는 사용자를 위한 UI",
+    "expected": [
+      "source:accessibility.md"
+    ]
+  },
+  {
+    "query": "파일을 잃어버려도 업무를 다시 시작할 수 있게 준비하기",
+    "expected": [
+      "source:backup.md"
+    ]
+  },
+  {
+    "query": "접속 자격증명이 코드 저장소에 올라가는 것을 막는 방법",
+    "expected": [
+      "source:secret.md"
+    ]
+  },
+  {
+    "query": "지식 검색이 필요한 문서를 잘 찾는지 평가하려면",
+    "expected": [
+      "source:search.md"
+    ]
+  },
+  {
+    "query": "내가 작성한 원본 메모를 AI가 덮어쓰지 않게 하려면",
+    "expected": [
+      "source:source.md"
+    ]
+  },
+  {
+    "query": "두 에이전트가 같은 문서를 동시에 고칠 때 보호하는 방법",
+    "expected": [
+      "source:conflict.md"
+    ]
+  },
+  {
+    "query": "신규 프로젝트에 필요한 돈을 어떻게 계산할까",
+    "expected": [
+      "source:budget.md"
+    ]
+  },
+  {
+    "query": "일이 끝난 뒤 같은 실수를 반복하지 않기 위한 활동",
+    "expected": [
+      "source:retrospective.md"
+    ]
+  }
+]

@@ -1,0 +1,12 @@
+.git
+.venv
+.test-artifacts
+.pytest_cache
+.ruff_cache
+__pycache__
+data
+models
+secrets
+.env
+config.toml
+docs
