@@ -135,10 +135,23 @@ def create_app(settings: Settings):
 
     @mcp.tool(annotations=readonly)
     async def read_attachment(
-        path: str, linked_from: str, linked_vault: str = "wiki", page: int = 1
+        path: str,
+        linked_from: str,
+        linked_vault: str = "wiki",
+        page: int = 1,
+        start: int = 1,
+        max_chars: int = 16000,
+        expected_hash: str | None = None,
     ) -> dict[str, Any]:
-        """Read explicitly linked HTML or text PDF (4 pages). No JavaScript or OCR execution."""
-        return await asyncio.to_thread(attachment, store, path, linked_from, linked_vault, page)
+        """Read explicitly linked HTML or text PDF. No JavaScript or OCR execution.
+        HTML: start is a 1-based position in extracted text; max_chars is 1..16000.
+        Continue with start=next_start and expected_hash=hash until next_start is null.
+        total_characters is the full extracted length; receipts cover only the returned range.
+        PDF: use page (up to 4 pages per call); start/max_chars are HTML-only.
+        """
+        return await asyncio.to_thread(
+            attachment, store, path, linked_from, linked_vault, page, start, max_chars, expected_hash
+        )
 
     @mcp.tool(
         annotations=ToolAnnotations(

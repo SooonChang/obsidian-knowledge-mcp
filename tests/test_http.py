@@ -100,6 +100,34 @@ async def test_two_mcp_clients_search_save_read(endpoint, request_data):
     await asyncio.gather(client_action(True), client_action(False))
 
 
+async def test_mcp_html_continuation(endpoint, store):
+    source = store.settings.policy().source
+    text = "처음" + "가" * 32000 + "끝"
+    (source / "long.html").write_text(f"<p>{text}</p>", encoding="utf-8")
+    (source / "linked.md").write_text("[[long.html]]", encoding="utf-8")
+    url, token = endpoint
+    async with httpx.AsyncClient(headers={"Authorization": "Bearer " + token}) as http:
+        async with streamable_http_client(url, http_client=http) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                schema = next(t for t in (await session.list_tools()).tools if t.name == "read_attachment")
+                assert {"start", "max_chars", "expected_hash"} <= schema.inputSchema["properties"].keys()
+                args = {"path": "long.html", "linked_from": "linked.md", "linked_vault": "source"}
+                pieces = []
+                for _ in range(3):
+                    result = await session.call_tool("read_attachment", args)
+                    assert not result.isError, result
+                    data = result.structuredContent
+                    pieces.append(data["content"])
+                    if data["next_start"] is None:
+                        break
+                    args.update(start=data["next_start"], expected_hash=data["hash"])
+                assert data["next_start"] is None
+                assert "".join(pieces) == text
+                invalid = await session.call_tool("read_attachment", args | {"start": 0})
+                assert invalid.isError
+
+
 def test_http_auth_and_origin(endpoint):
     url, token = endpoint
     assert httpx.post(url, json={}).status_code == 401

@@ -19,6 +19,15 @@ HTML·PDF 첨부는 `read_attachment`로 읽는다. `path`에는 원문 vault �
 같은 이름이 여러 개면 노트의 링크를 `[[_Attachments/보고서.html]]`처럼 전체 상대 경로로 명시해야 한다.
 일반 Markdown 링크는 경로로 해석하며, 파일명만으로 vault 전체를 검색하지 않는다.
 
+HTML은 추출된 본문 기준으로 한 번에 최대 16,000자를 반환한다. 첫 호출은 `start=1`이며,
+`next_start`가 있으면 같은 첨부와 노트에 `start=next_start`, `expected_hash=hash`를 전달해 이어 읽는다.
+`next_start=null`이 될 때까지 반복하면 끝까지 읽을 수 있다. `max_chars`로 응답 길이를 1~16,000자에서
+조절할 수 있으며, `total_characters`는 전체 추출 길이, `start`·`end`는 1부터 세는 양 끝 포함 범위다.
+빈 HTML 본문은 `start=1`, `end=0`, `next_start=null`을 반환한다.
+`truncated=true`는 뒤에 읽을 본문이 남았다는 뜻이다. 읽는 도중 hash가 달라지면 처음부터 재조회한다.
+각 receipt는 해당 응답 범위만 확인했음을 뜻하므로 첫 구간만 읽고 전체 확인으로 보고하지 않는다.
+PDF는 기존처럼 `page`를 사용한다.
+
 ## 자동 저장
 
 사용자는 다음 필터를 통과한 지식의 자동 저장을 허용했다.

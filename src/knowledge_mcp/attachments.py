@@ -13,6 +13,8 @@ from pypdf import PdfReader
 from .config import VaultPolicy
 from .storage import Store, atomic_write, digest, now, split_frontmatter
 
+MAX_ATTACHMENT_CHARACTERS = 16_000
+
 
 def _filename_matches(store: Store, policy: VaultPolicy, name: str) -> set[str]:
     """Find allowed source files, including attachments not yet downloaded."""
@@ -49,7 +51,20 @@ def _filename_matches(store: Store, policy: VaultPolicy, name: str) -> set[str]:
     return matches
 
 
-def read_attachment(store: Store, path: str, linked_from: str, linked_vault="wiki", page=1):
+def read_attachment(
+    store: Store,
+    path: str,
+    linked_from: str,
+    linked_vault="wiki",
+    page=1,
+    start=1,
+    max_chars=MAX_ATTACHMENT_CHARACTERS,
+    expected_hash=None,
+):
+    if start < 1:
+        raise ValueError("start must be a 1-based character position")
+    if not 1 <= max_chars <= MAX_ATTACHMENT_CHARACTERS:
+        raise ValueError(f"max_chars must be 1..{MAX_ATTACHMENT_CHARACTERS}")
     policy = store.settings.policy()
     referring = policy.resolve(linked_vault, linked_from).read_text("utf-8-sig")
     meta, _, _ = split_frontmatter(referring)
@@ -79,6 +94,8 @@ def read_attachment(store: Store, path: str, linked_from: str, linked_vault="wik
         raise ValueError("Attachment must be explicitly linked by the referring note")
     if source_path.suffix.lower() not in (".pdf", ".html", ".htm"):
         raise ValueError("Only linked HTML and text PDF are supported; no OCR")
+    if source_path.suffix.lower() == ".pdf" and (start != 1 or max_chars != MAX_ATTACHMENT_CHARACTERS):
+        raise ValueError("start and max_chars are HTML-only; use page for PDF")
     if not source_path.exists():
         if not store.settings.source_sync.get("enabled"):
             raise FileNotFoundError("Attachment unavailable")
@@ -93,6 +110,10 @@ def read_attachment(store: Store, path: str, linked_from: str, linked_vault="wik
     if source_path.stat().st_size > 25_000_000:
         raise ValueError("Attachment exceeds 25 MB")
     data = source_path.read_bytes()
+    file_hash = digest(data)
+    if expected_hash is not None and expected_hash != file_hash:
+        raise ValueError("Attachment changed since read; restart reading from the beginning")
+    continuation = {}
     if source_path.suffix.lower() == ".pdf":
         reader = PdfReader(source_path)
         if page < 1 or page > len(reader.pages):
@@ -103,27 +124,39 @@ def read_attachment(store: Store, path: str, linked_from: str, linked_vault="wik
         unit = "pages"
         if not text.strip():
             return {"path": path, "available": False, "reason": "No text layer; OCR is not supported"}
+        content = text[:MAX_ATTACHMENT_CHARACTERS]
+        truncated = len(text) > MAX_ATTACHMENT_CHARACTERS
     else:
         soup = BeautifulSoup(data, "html.parser")
         for element in soup(["script", "style", "iframe", "object", "noscript"]):
             element.decompose()
         text = soup.get_text("\n", strip=True)
-        start, end, unit = 1, min(len(text), 16000), "characters"
+        if start > max(1, len(text)):
+            raise ValueError("start is beyond the extracted HTML text")
+        end, unit = min(start - 1 + max_chars, len(text)), "characters"
+        content = text[start - 1 : end]
+        truncated = end < len(text)
+        continuation = {
+            "total_characters": len(text),
+            "next_start": end + 1 if truncated else None,
+        }
     ident = uuid.uuid4().hex
+    checked_at = now()
     with store.db() as db:
         db.execute(
             "INSERT INTO receipts VALUES (?,?,?,?,?,?,?)",
-            (ident, "source", path, digest(data), now(), start, end),
+            (ident, "source", path, file_hash, checked_at, start, end),
         )
     return {
         "path": path,
         "vault": "source",
-        "hash": digest(data),
+        "hash": file_hash,
         "receipt": ident,
-        "checked_at": now(),
+        "checked_at": checked_at,
         "range_unit": unit,
         "start": start,
         "end": end,
-        "content": text[:16000],
-        "truncated": len(text) > 16000,
+        "content": content,
+        "truncated": truncated,
+        **continuation,
     }

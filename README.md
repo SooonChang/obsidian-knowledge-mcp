@@ -119,7 +119,7 @@ Python에서 의미 검색 서비스까지 실행할 때의 모델 준비·경�
 | search_notes | query, scope(auto/wiki/source/both), mode(auto/keyword/hybrid), limit |
 | read_note | vault, path, start/end 또는 section; 최대 400행, 문서 해시·확인 receipt |
 | get_sources | 위키의 source 연결과 확인 날짜 |
-| read_attachment | 원문에 연결된 HTML·텍스트 PDF; 비동기 다운로드 시 pending 반환 |
+| read_attachment | 연결된 HTML은 start/next_start로 구간별 읽기, 텍스트 PDF는 page로 읽기; 다운로드 대기 시 pending |
 | save_knowledge | 구조화된 저장 요청, 필터·근거·기대 해시·원문 receipt 검증 |
 | lint | 읽기 전용 구조·링크·출처 점검 |
 | get_status | 동기화·Git·색인·임베딩 상태 |
