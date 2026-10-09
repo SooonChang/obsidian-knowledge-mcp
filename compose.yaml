@@ -9,7 +9,7 @@ services:
     tmpfs: ["/tmp"]
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
-    ports: ["127.0.0.1:8765:8765"]
+    ports: ["${MCP_BIND_HOST:-127.0.0.1}:8765:8765"]
     environment:
       KNOWLEDGE_TOKEN_FILE: /run/secrets/mcp_token
     volumes:

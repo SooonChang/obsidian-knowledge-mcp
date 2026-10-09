@@ -105,5 +105,9 @@ Claude Code 등 HTTP MCP 클라이언트도 같은 URL과 Authorization: Bearer 
 클라이언트별 설정 화면/설정 파일에서 헤더를 등록하고 실제 initialize·tools/list 연결을 확인합니다.
 추가로 AGENT_GUIDE.md의 지침을 클라이언트의 사용자 규칙 또는 스킬에 넣습니다.
 
-HTTP 포트는 Docker가 호스트 loopback에만 공개합니다. VPN 공개나 공인 인터넷 OAuth 배포는 이 버전 범위가 아닙니다.
+HTTP 포트는 기본적으로 호스트 loopback에만 공개합니다. 같은 LAN에서 직접 연결하려면
+`.env`의 `MCP_BIND_HOST`를 서버 LAN IP로 설정하고 `config.toml`의 `allowed_hosts`에
+`"서버LAN-IP:*"`를 추가한 뒤 `docker compose up -d --no-deps --force-recreate mcp`로 반영합니다.
+클라이언트는 `http://서버LAN-IP:8765/mcp`와 기존 Bearer 토큰을 사용합니다.
+VPN 공개나 공인 인터넷 OAuth 배포는 이 버전 범위가 아닙니다.
 Docker 이미지가 동일하더라도 실제 x64/ARM 처리 속도와 메모리는 장비별로 다릅니다.
