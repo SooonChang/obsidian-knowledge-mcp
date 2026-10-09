@@ -62,6 +62,11 @@ OpenSSL 포맷을 rclone crypt로 오인하거나 자동 변환하지 않습니�
 
 ## Git 서버 브랜치 준비와 시작
 
+UID/GID는 `.env`의 APP_UID/APP_GID와 Compose의 `user`에서만 지정합니다.
+컨테이너 시작 시 실행 UID/GID에 필요한 계정 정보를 `/tmp`에 자동 생성하고 nss_wrapper로 SSH에 제공합니다.
+이미지 빌드 시 사용자 번호를 지정하지 않으므로 같은 이미지를 다른 UID/GID의 서버에서 사용할 수 있습니다.
+선택적으로 `./compose.sh`를 사용하면 현재 호스트 사용자의 UID/GID를 자동으로 전달합니다.
+
 전용 checkout을 clone한 뒤:
 
     docker compose build
