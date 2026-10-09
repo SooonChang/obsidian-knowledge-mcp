@@ -70,7 +70,8 @@ def git(root, *args):
     return result.stdout.decode().strip()
 
 
-def test_git_only_server_branch_and_unowned_change(store, tmp_path, request_data):
+@pytest.mark.parametrize("branch", ["codex/wiki-memory", "wiki-memory"])
+def test_git_only_server_branch_and_unowned_change(store, tmp_path, request_data, branch):
     root = store.settings.wiki_root
     git(root, "init", "-b", "main")
     git(root, "add", ".")
@@ -80,14 +81,14 @@ def test_git_only_server_branch_and_unowned_change(store, tmp_path, request_data
     git(root, "remote", "add", "origin", str(remote))
     git(root, "push", "-u", "origin", "main")
     original_main = git(root, "rev-parse", "main")
-    store.settings.git = {"enabled": True, "branch": "codex/wiki-memory"}
+    store.settings.git = {"enabled": True, "branch": branch}
     sync = GitSync(store)
     sync.initialize()
     Knowledge(store).save(SaveRequest(**request_data))
     result = sync.once()
     assert result["ok"]
     assert git(root, "rev-parse", "origin/main") == original_main
-    assert git(root, "rev-parse", "HEAD") == git(root, "rev-parse", "origin/codex/wiki-memory")
+    assert git(root, "rev-parse", "HEAD") == git(root, "rev-parse", "origin/" + branch)
     (root / "README.md").write_text("other person's file")
     with pytest.raises(ValueError, match="Unowned"):
         sync.once()
@@ -98,3 +99,10 @@ def test_git_dirty_initialization_refused(store):
     git(root, "init", "-b", "main")
     with pytest.raises(ValueError, match="dirty"):
         GitSync(store).initialize()
+
+
+@pytest.mark.parametrize("branch", ["main", "master", "HEAD", "-bad", "bad..name", "@{-1}"])
+def test_git_invalid_server_branch_refused(store, branch):
+    store.settings.git = {"enabled": True, "branch": branch}
+    with pytest.raises(ValueError, match="Invalid server branch"):
+        GitSync(store)

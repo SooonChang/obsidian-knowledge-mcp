@@ -75,7 +75,10 @@ OpenSSL 포맷을 rclone crypt로 오인하거나 자동 변환하지 않습니�
 
 아래 브랜치 관리는 위키 저장소의 전용 checkout에만 적용되며 MCP 코드 저장소의 브랜치와는 무관합니다.
 
-git-init은 깨끗한 checkout에서만 codex/wiki-memory를 선택하거나 origin/main으로부터 생성합니다.
+서버 브랜치 이름은 `config.toml`의 `git.branch`에서 설정합니다. 기본값은 `codex/wiki-memory`이며
+다른 유효한 Git 브랜치 이름도 사용할 수 있습니다. `main`과 `master`는 서버 브랜치로 허용하지 않습니다.
+
+git-init은 깨끗한 checkout에서만 설정한 서버 브랜치를 선택하거나 origin/main으로부터 생성합니다.
 서버는 저장된 문서를 전용 브랜치에 commit/push합니다. 사용자 PC main 반영은 사용자가 별도로 병합합니다.
 자동 PR 생성이나 기본 브랜치 push는 하지 않습니다.
 원격 merge 충돌 시 자동 처리를 중단하고 수동 해결을 기다립니다.

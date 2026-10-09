@@ -160,7 +160,13 @@ class GitSync:
         self.settings = store.settings
         self.root = self.settings.wiki_root
         self.branch = self.settings.git.get("branch", "codex/wiki-memory")
-        if not self.branch.startswith("codex/") or any(x in self.branch for x in ("..", " ", "~", "^", ":")):
+        if not isinstance(self.branch, str) or self.branch in ("main", "master"):
+            raise ValueError("Invalid server branch")
+        try:
+            checked = run(["git", "check-ref-format", "--branch", self.branch])
+        except CommandFailure as exc:
+            raise ValueError("Invalid server branch") from exc
+        if checked != self.branch:
             raise ValueError("Invalid server branch")
 
     def git(self, *args):
