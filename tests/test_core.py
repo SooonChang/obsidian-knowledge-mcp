@@ -1,5 +1,7 @@
 import copy
 import json
+import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -8,6 +10,23 @@ from knowledge_mcp.attachments import read_attachment
 from knowledge_mcp.knowledge import Knowledge, SaveRequest
 from knowledge_mcp.semantic import hybrid_search
 from knowledge_mcp.storage import Store, chunks, split_frontmatter
+
+
+def test_service_store_can_start_during_writer_job(store):
+    code = (
+        "from pathlib import Path; from knowledge_mcp.config import Settings; "
+        "from knowledge_mcp.storage import Store; "
+        f"s=Settings(wiki_root=Path({str(store.settings.wiki_root)!r}), "
+        f"data_dir=Path({str(store.settings.data_dir)!r})); "
+        "store=Store(s); print('ready')"
+    )
+    # Use a separate process so a thread-local/reentrant lock cannot hide the
+    # startup contention that occurs between Compose services.
+    with store.lock:
+        result = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, check=True, timeout=5
+        )
+    assert result.stdout.strip() == "ready"
 
 
 @pytest.mark.parametrize("target", ["wiki", "source"])

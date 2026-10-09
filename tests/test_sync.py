@@ -2,9 +2,10 @@ import json
 import subprocess
 
 import pytest
+from filelock import FileLock
 
 from knowledge_mcp.knowledge import Knowledge, SaveRequest
-from knowledge_mcp.storage import digest
+from knowledge_mcp.storage import Store, digest
 from knowledge_mcp.sync import GitSync, SourceSync
 
 
@@ -20,6 +21,10 @@ def test_source_snapshots_and_delete(store, tmp_path, monkeypatch):
     calls = []
 
     def fake_command(self, *args):
+        # Another process can acquire the writer lock during S3 I/O, including
+        # both initial sync and on-demand attachments.
+        with FileLock(store.lock.lock_file, timeout=0):
+            pass
         calls.append(args[0])
         if args[0] == "lsjson":
             return json.dumps([{"Path": k, "Size": len(v), "ModTime": digest(v)} for k, v in remote.items()])
@@ -71,7 +76,7 @@ def git(root, *args):
 
 
 @pytest.mark.parametrize("branch", ["codex/wiki-memory", "wiki-memory"])
-def test_git_only_server_branch_and_unowned_change(store, tmp_path, request_data, branch):
+def test_git_only_server_branch_and_unowned_change(store, tmp_path, request_data, branch, monkeypatch):
     root = store.settings.wiki_root
     git(root, "init", "-b", "main")
     git(root, "add", ".")
@@ -83,10 +88,26 @@ def test_git_only_server_branch_and_unowned_change(store, tmp_path, request_data
     original_main = git(root, "rev-parse", "main")
     store.settings.git = {"enabled": True, "branch": branch}
     sync = GitSync(store)
+    real_git = sync.git
+    saved_during_fetch = False
+
+    def checked_git(*args):
+        nonlocal saved_during_fetch
+        if args[0] in ("fetch", "push"):
+            with FileLock(store.lock.lock_file, timeout=0):
+                pass
+            if args[0] == "fetch" and git(root, "branch", "--show-current") == branch:
+                other = Store(store.settings)
+                other.lock.timeout = 0
+                assert Knowledge(other).save(SaveRequest(**request_data))["saved"]
+                saved_during_fetch = True
+        return real_git(*args)
+
+    monkeypatch.setattr(sync, "git", checked_git)
     sync.initialize()
-    Knowledge(store).save(SaveRequest(**request_data))
     result = sync.once()
     assert result["ok"]
+    assert saved_during_fetch
     assert git(root, "rev-parse", "origin/main") == original_main
     assert git(root, "rev-parse", "HEAD") == git(root, "rev-parse", "origin/" + branch)
     (root / "README.md").write_text("other person's file")

@@ -7,6 +7,8 @@ import time
 import uuid
 from pathlib import Path
 
+from filelock import FileLock
+
 from .config import Settings, relative_path
 from .storage import Store, atomic_write, digest, now
 
@@ -28,6 +30,7 @@ class SourceSync:
         self.store, self.settings = store, store.settings
         self.root = self.settings.snapshot_dir
         self.remote = self.settings.source_sync.get("remote", "")
+        self.lock = FileLock(str(self.settings.data_dir / "source-sync.lock"), timeout=30)
         # Require a configured rclone remote, never a local filesystem source or ad-hoc backend.
         if self.settings.source_sync.get("enabled") and (
             not self.root
@@ -73,7 +76,9 @@ class SourceSync:
     def once(self):
         if not self.settings.source_sync.get("enabled"):
             return {"enabled": False}
-        with self.store.lock:
+        # Serialize snapshots and attachments without blocking wiki writers
+        # during remote listing/downloads.
+        with self.lock:
             self.root.mkdir(parents=True, exist_ok=True)
             before = self.listing()
             policy = self.settings.policy()
@@ -106,11 +111,12 @@ class SourceSync:
             if before != after:
                 raise ValueError("Remote changed during sync; previous generation retained")
             # A stable object listing is not a transaction across an Obsidian upload.
-            atomic_write(old_pointer, json.dumps(manifest, ensure_ascii=False).encode())
-            state = self.store.state(
-                "source_sync", {"ok": True, "at": now(), "generation": generation, "files": len(before)}
-            )
-            self.store.reindex("source")
+            with self.store.lock:
+                atomic_write(old_pointer, json.dumps(manifest, ensure_ascii=False).encode())
+                state = self.store.state(
+                    "source_sync", {"ok": True, "at": now(), "generation": generation, "files": len(before)}
+                )
+                self.store.reindex("source")
             self.prune(generation)
             return state
 
@@ -131,7 +137,7 @@ class SourceSync:
     def attachment(self, path):
         if not self.settings.source_sync.get("enabled"):
             raise FileNotFoundError("Attachment unavailable")
-        with self.store.lock:
+        with self.lock:
             pointer = json.loads((self.root / "current.json").read_text())
             policy = self.settings.policy()
             if not policy.allowed("source", path):
@@ -159,6 +165,7 @@ class GitSync:
         self.store = store
         self.settings = store.settings
         self.root = self.settings.wiki_root
+        self.lock = FileLock(str(self.settings.data_dir / "git-sync.lock"), timeout=30)
         self.branch = self.settings.git.get("branch", "codex/wiki-memory")
         if not isinstance(self.branch, str) or self.branch in ("main", "master"):
             raise ValueError("Invalid server branch")
@@ -173,24 +180,43 @@ class GitSync:
         return run(["git", *args], cwd=self.root)
 
     def initialize(self):
-        with self.store.lock:
-            if self.git("status", "--porcelain"):
-                raise ValueError("Refuse initialization in a dirty checkout")
+        with self.lock:
+            with self.store.lock:
+                if self.git("status", "--porcelain"):
+                    raise ValueError("Refuse initialization in a dirty checkout")
             self.git("fetch", "origin")
-            try:
-                self.git("show-ref", "--verify", "--quiet", "refs/heads/" + self.branch)
-                self.git("switch", self.branch)
-            except CommandFailure:
+            with self.store.lock:
+                if self.git("status", "--porcelain"):
+                    raise ValueError("Refuse initialization in a dirty checkout")
                 try:
-                    self.git("show-ref", "--verify", "--quiet", "refs/remotes/origin/" + self.branch)
-                    self.git("switch", "-c", self.branch, "--track", "origin/" + self.branch)
+                    self.git("show-ref", "--verify", "--quiet", "refs/heads/" + self.branch)
+                    self.git("switch", self.branch)
                 except CommandFailure:
-                    self.git("switch", "-c", self.branch, "origin/main")
+                    try:
+                        self.git("show-ref", "--verify", "--quiet", "refs/remotes/origin/" + self.branch)
+                        self.git("switch", "-c", self.branch, "--track", "origin/" + self.branch)
+                    except CommandFailure:
+                        self.git("switch", "-c", self.branch, "origin/main")
             return {"branch": self.branch}
 
     def once(self):
         if not self.settings.git.get("enabled"):
             return {"enabled": False}
+        with self.lock:
+            self._commit_owned()
+            self.git("fetch", "origin")
+            with self.store.lock:
+                # Saving can proceed during fetch. Commit any such writes before
+                # merge so Git never auto-stashes or absorbs a dirty checkout.
+                self._commit_owned()
+                self._merge_remote()
+            self.git("push", "origin", "HEAD:refs/heads/" + self.branch)
+            self.store.reindex("wiki")
+            return self.store.state(
+                "git", {"ok": True, "at": now(), "head": self.git("rev-parse", "HEAD"), "branch": self.branch}
+            )
+
+    def _commit_owned(self):
         with self.store.lock:
             if self.git("branch", "--show-current") != self.branch:
                 raise ValueError("Checkout must be initialized on server branch")
@@ -230,32 +256,28 @@ class GitSync:
                     "-m",
                     "Update evidence-based wiki memory",
                 )
-            self.git("fetch", "origin")
-            for ref in ("origin/" + self.branch, "origin/main"):
-                try:
-                    self.git("rev-parse", "--verify", ref)
-                except CommandFailure:
-                    continue
-                try:
-                    self.git(
-                        "-c",
-                        "user.name=Knowledge MCP",
-                        "-c",
-                        "user.email=knowledge-mcp@localhost",
-                        "merge",
-                        "--no-edit",
-                        ref,
-                    )
-                except CommandFailure:
-                    self.git("merge", "--abort")
-                    raise ValueError(
-                        "Git merge conflict; server branch preserved for manual resolution"
-                    ) from None
-            self.git("push", "origin", "HEAD:refs/heads/" + self.branch)
-            self.store.reindex("wiki")
-            return self.store.state(
-                "git", {"ok": True, "at": now(), "head": self.git("rev-parse", "HEAD"), "branch": self.branch}
-            )
+
+    def _merge_remote(self):
+        for ref in ("origin/" + self.branch, "origin/main"):
+            try:
+                self.git("rev-parse", "--verify", ref)
+            except CommandFailure:
+                continue
+            try:
+                self.git(
+                    "-c",
+                    "user.name=Knowledge MCP",
+                    "-c",
+                    "user.email=knowledge-mcp@localhost",
+                    "merge",
+                    "--no-edit",
+                    ref,
+                )
+            except CommandFailure:
+                self.git("merge", "--abort")
+                raise ValueError(
+                    "Git merge conflict; server branch preserved for manual resolution"
+                ) from None
 
 
 def worker(settings: Settings, *, once=False):

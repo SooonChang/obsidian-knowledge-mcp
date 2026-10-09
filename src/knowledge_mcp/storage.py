@@ -83,7 +83,8 @@ class Store:
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         self.lock = FileLock(str(settings.data_dir / "writer.lock"), timeout=30)
         self.db_path = settings.data_dir / "knowledge.db"
-        with self.lock, self.db() as db:
+        # Schema initialization must not wait behind a long wiki write/index job.
+        with FileLock(str(settings.data_dir / "schema.lock"), timeout=30), self.db() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS documents (
                   vault TEXT, path TEXT, hash TEXT, title TEXT, metadata TEXT,
@@ -171,8 +172,10 @@ class Store:
     def reindex(self, scope="both"):
         if scope not in ("wiki", "source", "both"):
             raise ValueError("Invalid indexing scope")
-        policy, counts, errors = self.settings.policy(), {}, {}
+        counts, errors = {}, {}
         with self.lock:
+            # Resolve the active snapshot after acquiring the publication lock.
+            policy = self.settings.policy()
             for vault in ("wiki", "source") if scope == "both" else (scope,):
                 try:
                     files = list(policy.notes(vault))
