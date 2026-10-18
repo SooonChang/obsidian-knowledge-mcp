@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
 import re
 import uuid
 from pathlib import Path, PurePosixPath
@@ -37,10 +38,11 @@ def _filename_matches(store: Store, policy: VaultPolicy, name: str) -> set[str]:
             except (ValueError, OSError):
                 pass
     if store.settings.snapshot_dir:
-        manifest = json.loads((store.settings.snapshot_dir / "current.json").read_text("utf-8"))
-        if manifest["generation"] != policy.source.name:
+        pointer = store.settings.snapshot_dir / "current.json"
+        manifest = json.loads(pointer.read_text("utf-8")) if pointer.exists() else {}
+        if manifest and manifest["generation"] != policy.source.name:
             raise ValueError("Source snapshot changed; retry reading the attachment")
-        for relative in manifest["files"]:
+        for relative in set(manifest.get("files", {})) | set(policy.image_manifest().get("files", {})):
             if PurePosixPath(relative).name != name:
                 continue
             try:
@@ -49,6 +51,41 @@ def _filename_matches(store: Store, policy: VaultPolicy, name: str) -> set[str]:
             except (ValueError, OSError):
                 pass
     return matches
+
+
+def linked_attachment(store: Store, policy: VaultPolicy, path: str, linked_from: str, linked_vault: str):
+    """Validate an explicit note link and return its allowed source path."""
+    referring = policy.resolve(linked_vault, linked_from).read_text("utf-8-sig")
+    meta, _, _ = split_frontmatter(referring)
+    sources = meta.get("source", [])
+    sources = [sources] if isinstance(sources, str) else sources
+    # Require a precise link, not arbitrary text containing an attachment name.
+    wiki_links = {unquote(x.strip()) for x in re.findall(r"!?\[\[([^\]|#]+)(?:[^\]]*)\]\]", referring)}
+    links = re.findall(r"!?\[[^\]]*\]\(([^)]+)\)", referring)
+    # Filename-only wikilinks need unique resolution, even if a root file matches.
+    short_links = {x for x in wiki_links if "/" not in x and "\\" not in x and ":" not in x}
+    references = {unquote(x.strip("<>")) for x in links} | set(sources) | (wiki_links - short_links)
+    source_path = policy.resolve("source", path, exists=False)
+    exact = path in references
+    if linked_vault == "source":
+        for link in references:
+            if "://" not in link:
+                candidate = posixpath.normpath(str(PurePosixPath(linked_from).parent / link))
+                exact |= candidate == path
+    if not exact and source_path.name in short_links:
+        matches = _filename_matches(store, policy, source_path.name)
+        if path in matches and len(matches) > 1:
+            raise ValueError(
+                "Ambiguous attachment filename; use a vault-relative path in the referring wikilink"
+            )
+        exact = matches == {path}
+        if not matches and policy.snapshot_dir and policy.is_image(path):
+            # Before the image listing is published, a filename link can only
+            # yield pending. read_image checks the manifest before serving bytes.
+            exact = path not in policy.image_manifest().get("files", {})
+    if not exact:
+        raise ValueError("Attachment must be explicitly linked by the referring note")
+    return source_path
 
 
 def read_attachment(
@@ -66,32 +103,7 @@ def read_attachment(
     if not 1 <= max_chars <= MAX_ATTACHMENT_CHARACTERS:
         raise ValueError(f"max_chars must be 1..{MAX_ATTACHMENT_CHARACTERS}")
     policy = store.settings.policy()
-    referring = policy.resolve(linked_vault, linked_from).read_text("utf-8-sig")
-    meta, _, _ = split_frontmatter(referring)
-    sources = meta.get("source", [])
-    sources = [sources] if isinstance(sources, str) else sources
-    # Require a precise link, not arbitrary text containing an attachment name.
-    wiki_links = {unquote(x.strip()) for x in re.findall(r"!?\[\[([^\]|#]+)(?:[^\]]*)\]\]", referring)}
-    links = re.findall(r"!?\[[^\]]*\]\(([^)]+)\)", referring)
-    # Filename-only wikilinks need unique resolution, even if a root file matches.
-    short_links = {x for x in wiki_links if "/" not in x and "\\" not in x and ":" not in x}
-    references = {unquote(x.strip("<>")) for x in links} | set(sources) | (wiki_links - short_links)
-    source_path = policy.resolve("source", path, exists=False)
-    exact = path in references
-    if linked_vault == "source":
-        for link in references:
-            if "://" not in link:
-                candidate = (policy.source / PurePosixPath(linked_from).parent / link).resolve()
-                exact |= candidate == source_path
-    if not exact and source_path.name in short_links:
-        matches = _filename_matches(store, policy, source_path.name)
-        if path in matches and len(matches) > 1:
-            raise ValueError(
-                "Ambiguous attachment filename; use a vault-relative path in the referring wikilink"
-            )
-        exact = matches == {path}
-    if not exact:
-        raise ValueError("Attachment must be explicitly linked by the referring note")
+    source_path = linked_attachment(store, policy, path, linked_from, linked_vault)
     if source_path.suffix.lower() not in (".pdf", ".html", ".htm"):
         raise ValueError("Only linked HTML and text PDF are supported; no OCR")
     if source_path.suffix.lower() == ".pdf" and (start != 1 or max_chars != MAX_ATTACHMENT_CHARACTERS):

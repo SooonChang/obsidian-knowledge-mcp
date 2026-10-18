@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -15,6 +16,14 @@ from .storage import Store, atomic_write, digest, now
 
 class CommandFailure(RuntimeError):
     pass
+
+
+class SyncValidationError(ValueError):
+    """A validation error whose code and message contain no remote data."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
 
 
 def run(args, *, cwd=None, timeout=300):
@@ -57,19 +66,22 @@ class SourceSync:
                 continue
             if record.get("IsLink") or record.get("Size", 0) < 0:
                 continue
-            if path.lower().endswith((".md", ".html", ".htm", ".pdf")):
+            if self.accept_file(policy, path):
                 files[path] = {"size": record["Size"], "mtime": record.get("ModTime"), "id": record.get("ID")}
         return files
+
+    def accept_file(self, policy, path):
+        return path.lower().endswith((".md", ".html", ".htm", ".pdf"))
 
     def download(self, path: str, dest: Path, expected):
         relative_path(path)
         limit = 4_000_000 if path.lower().endswith(".md") else 25_000_000
         if expected["size"] > limit:
-            raise ValueError("Remote document exceeds configured size limit")
+            raise SyncValidationError("file_too_large", "Remote document exceeds configured size limit")
         dest.parent.mkdir(parents=True, exist_ok=True)
         self.command("copyto", self.remote.rstrip("/") + "/" + path, str(dest), "--retries", "2")
         if dest.is_symlink() or dest.stat().st_size != expected["size"]:
-            raise ValueError("Downloaded size differs from remote listing")
+            raise SyncValidationError("download_size_mismatch", "Downloaded size differs from remote listing")
         if path.lower().endswith(".md"):
             dest.read_text("utf-8-sig")
 
@@ -158,6 +170,122 @@ class SourceSync:
                 raise ValueError("Attachment changed during download")
             os.replace(temp, file)
             return file
+
+
+class ImageSync(SourceSync):
+    """Maintain one latest image mirror independently of Markdown generations."""
+
+    def accept_file(self, policy, path):
+        return policy.is_image(path)
+
+    def once(self):
+        if not self.settings.source_sync.get("enabled"):
+            return self.store.state("image_sync", {"enabled": False, "status": "disabled"})
+        from .images import ImageValidationError
+
+        prior = self.store.state("image_sync") or {}
+        progress = {
+            "enabled": True, "ok": False, "status": "running", "stage": "preparing",
+            "started_at": now(), "total": 0, "processed": 0, "downloaded": 0, "reused": 0,
+            "last_success_at": prior.get("last_success_at") or prior.get("at"),
+        }
+        self.store.state("image_sync", progress)
+        try:
+            return self._once(progress)
+        except Exception as exc:
+            known = isinstance(exc, (SyncValidationError, ImageValidationError))
+            progress.update(
+                ok=False, status="failed", error=type(exc).__name__, attempt=now(),
+                code=exc.code if known else "image_sync_failed",
+                message=str(exc) if known else "Image sync failed; inspect private operator logs",
+            )
+            self.store.state("image_sync", progress)
+            raise
+
+    def _once(self, progress):
+        from .images import decode_image
+
+        with self.lock:
+            self.root.mkdir(parents=True, exist_ok=True)
+            root = self.root / "images"
+            if root.is_symlink():
+                raise SyncValidationError("unsafe_image_path", "Linked image directories are forbidden")
+            root.mkdir(exist_ok=True)
+            policy = self.settings.policy()
+            progress.update(stage="listing")
+            self.store.state("image_sync", progress)
+            before = self.listing()
+            progress.update(total=len(before), stage="downloading")
+            self.store.state("image_sync", progress)
+            old = policy.image_manifest().get("files", {})
+            files, downloads = {}, {}
+            with tempfile.TemporaryDirectory(prefix="image-stage-", dir=self.root) as staging:
+                for path, metadata in before.items():
+                    # An opaque reference lets an operator correlate a failure
+                    # locally without revealing vault filenames in MCP or logs.
+                    progress.update(file_id=digest(path))
+                    self.store.state("image_sync", progress)
+                    target = policy.resolve("source", path, exists=False)
+                    previous = old.get(path, {})
+                    if (
+                        previous.get("remote") == metadata
+                        and target.is_file()
+                        and target.stat().st_size == metadata["size"]
+                        and digest(target.read_bytes()) == previous.get("hash")
+                    ):
+                        files[path] = previous
+                        progress.update(processed=progress["processed"] + 1, reused=progress["reused"] + 1)
+                        self.store.state("image_sync", progress)
+                        continue
+                    temp = Path(staging) / path
+                    self.download(path, temp, metadata)
+                    data = temp.read_bytes()
+                    progress.update(stage="validating")
+                    self.store.state("image_sync", progress)
+                    image, _ = decode_image(data, Path(path).suffix)
+                    image.close()
+                    files[path] = {"remote": metadata, "hash": digest(data)}
+                    downloads[path] = temp
+                    progress.update(
+                        stage="downloading", processed=progress["processed"] + 1,
+                        downloaded=progress["downloaded"] + 1,
+                    )
+                    self.store.state("image_sync", progress)
+                progress.update(stage="verifying")
+                self.store.state("image_sync", progress)
+                if self.listing() != before:
+                    raise SyncValidationError("remote_changed", "Remote images changed during sync; publication deferred")
+                progress.update(stage="publishing")
+                self.store.state("image_sync", progress)
+                with self.store.lock:
+                    for path, temp in downloads.items():
+                        target = policy.resolve("source", path, exists=False)
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        os.replace(temp, target)
+                    # Publish before cleanup. A partially failed publication is
+                    # detected by hashes; an interrupted cleanup is retried below.
+                    at = now()
+                    atomic_write(self.root / "images.json", json.dumps({"at": at, "files": files}).encode())
+                    self._cleanup(set(files))
+                    progress.pop("file_id", None)
+                    progress.update(ok=True, status="complete", stage="complete", at=at, last_success_at=at, files=len(files))
+                    return self.store.state("image_sync", progress)
+
+    def _cleanup(self, keep):
+        root = self.root / "images"
+        # Only this dedicated mirror is scanned. Never traverse linked directories.
+        for directory, dirs, names in os.walk(root, topdown=False, followlinks=False):
+            for name in names:
+                file = Path(directory) / name
+                path = file.relative_to(root).as_posix()
+                if path not in keep:
+                    file.unlink()
+            for name in dirs:
+                child = Path(directory) / name
+                if child.is_symlink():
+                    child.unlink()
+                elif not any(child.iterdir()):
+                    child.rmdir()
 
 
 class GitSync:
@@ -289,25 +417,33 @@ def worker(settings: Settings, *, once=False):
     while True:
         jobs = []
         if time.monotonic() >= next_sync:
-            jobs = [("source_sync", SourceSync(store).once), ("git", GitSync(store).once)]
+            jobs = [
+                ("source_sync", SourceSync(store).once),
+                ("image_sync", ImageSync(store).once),
+                ("git", GitSync(store).once),
+            ]
             next_sync = time.monotonic() + 300
         for key, job in jobs:
             try:
                 job()
             except Exception as exc:
                 prior = store.state(key) or {}
-                store.state(
-                    key,
-                    prior
-                    | {
-                        "ok": False,
-                        "error": type(exc).__name__,
-                        "message": "Sync failed; inspect private operator logs",
-                        "attempt": now(),
-                    },
-                )
-                # Paths may be sensitive; operational stdout carries only error class.
-                print(f"{key}: {type(exc).__name__}", flush=True)
+                if key != "image_sync" or prior.get("status") != "failed":
+                    store.state(
+                        key,
+                        prior
+                        | {
+                            "ok": False,
+                            "error": type(exc).__name__,
+                            "message": "Sync failed; inspect private operator logs",
+                            "attempt": now(),
+                        },
+                    )
+                # Include only static diagnostics, never remote paths or stderr.
+                detail = ""
+                if key == "image_sync" and prior.get("status") == "failed":
+                    detail = f" (code={prior['code']}, stage={prior['stage']})"
+                print(f"{key}: {type(exc).__name__}{detail}", flush=True)
         if jobs:
             store.reindex("wiki")
         queue = settings.data_dir / "attachment-requests"

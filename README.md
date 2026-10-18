@@ -6,6 +6,7 @@ Obsidian vault의 지식을 AI 에이전트가 조회하고, 대화에서 재사
 ## 주요 기능
 
 - **원문 보호**: 원문 vault는 읽기 전용으로 참조합니다. 로컬 파일을 직접 연결하거나 S3에서 서버 사본으로 가져옵니다.
+- **이미지 조회**: 연결된 이미지를 AI에 전달합니다. S3 이미지는 공용 폴더에 변경분만 동기화하며 위키에는 복사하지 않습니다.
 - **위키 축적**: AI-Agent-Wiki에 저장 필터·출처·문서 규격을 적용해 지식을 저장하고 인덱스·로그를 갱신합니다.
 - **기본 검색**: SQLite 전문 검색과 한국어 부분 검색을 제공합니다. 별도 검색 DB 서버나 모델 설치가 필요 없습니다.
 - **선택적 의미 검색**: 로컬 다국어 임베딩으로 표현이 다른 관련 노트를 찾습니다. 모델은 별도로 준비합니다.
@@ -120,6 +121,7 @@ Python에서 의미 검색 서비스까지 실행할 때의 모델 준비·경�
 | read_note | vault, path, start/end 또는 section; 최대 400행, 문서 해시·확인 receipt |
 | get_sources | 위키의 source 연결과 확인 날짜 |
 | read_attachment | 연결된 HTML은 start/next_start로 구간별 읽기, 텍스트 PDF는 page로 읽기; 다운로드 대기 시 pending |
+| read_image | 연결된 PNG/JPEG/WebP/GIF를 이미지 콘텐츠로 반환; 첫 프레임·긴 변 최대 2,048px, 원문 receipt 제공 |
 | save_knowledge | 구조화된 저장 요청, 필터·근거·기대 해시·원문 receipt 검증 |
 | lint | 읽기 전용 구조·링크·출처 점검 |
 | get_status | 동기화·Git·색인·임베딩 상태 |

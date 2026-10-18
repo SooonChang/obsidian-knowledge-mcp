@@ -45,7 +45,7 @@ def main():
     elif args.command == "index":
         result = store.reindex()
     elif args.command == "status":
-        result = {k: store.state(k) for k in ("index", "source_sync", "git", "semantic")}
+        result = {k: store.state(k) for k in ("index", "source_sync", "image_sync", "git", "semantic")}
     elif args.command == "lint":
         from .knowledge import Knowledge
 

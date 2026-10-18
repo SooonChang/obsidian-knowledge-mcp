@@ -7,6 +7,8 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+
 
 def relative_path(value: str) -> str:
     if not value or "\\" in value or ":" in value or "\x00" in value:
@@ -127,11 +129,27 @@ class VaultPolicy:
                     return False
         return True
 
+    def is_image(self, path: str) -> bool:
+        return path.startswith(self.attachments + "/") and path.lower().endswith(IMAGE_EXTENSIONS)
+
+    def image_manifest(self) -> dict:
+        if not self.snapshot_dir:
+            return {}
+        file = self.snapshot_dir / "images.json"
+        return json.loads(file.read_text("utf-8")) if file.exists() else {}
+
     def resolve(self, vault: str, path: str, *, exists=True) -> Path:
         if not self.allowed(vault, path):
             raise ValueError("Path is outside the allowed vault scope")
         root = self.wiki if vault == "wiki" else self.source
-        if not root.is_dir():
+        shared_image = vault == "source" and self.snapshot_dir and self.is_image(path)
+        if shared_image:
+            root = self.snapshot_dir / "images"
+            if root.is_symlink():
+                raise ValueError("Linked filesystem paths are forbidden")
+            if exists and path not in self.image_manifest().get("files", {}):
+                raise FileNotFoundError("Image not in published image listing")
+        if not root.is_dir() and not (shared_image and not exists and not root.exists()):
             raise FileNotFoundError(f"{vault} vault unavailable")
         current = root
         for part in path.split("/"):

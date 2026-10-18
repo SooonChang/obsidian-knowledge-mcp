@@ -1,6 +1,7 @@
 """Exercise the real rclone binary against a local, read-only S3-compatible fixture."""
 
 import hashlib
+import io
 import shutil
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -8,13 +9,17 @@ from urllib.parse import parse_qs, unquote, urlparse
 from xml.sax.saxutils import escape
 
 import pytest
+from PIL import Image
 
-from knowledge_mcp.sync import SourceSync
+from knowledge_mcp.sync import ImageSync, SourceSync
 
 
 @pytest.mark.skipif(not shutil.which("rclone"), reason="rclone is installed in the Linux test image")
 def test_real_rclone_s3_download_never_writes(store, tmp_path, monkeypatch):
     objects = {"notes/a.md": "# 실제 S3 다운로드\n검증 노트".encode(), "notes/_Template/excluded.md": b"skip"}
+    output = io.BytesIO()
+    Image.new("RGB", (20, 10), "blue").save(output, format="PNG")
+    objects["notes/_Attachments/image.png"] = output.getvalue()
     writes = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -93,6 +98,13 @@ def test_real_rclone_s3_download_never_writes(store, tmp_path, monkeypatch):
         SourceSync(store).once()
         assert store.read("source", "a.md")["content"].startswith("# 실제 S3")
         assert not (store.settings.policy().source / "_Template/excluded.md").exists()
+        assert not (store.settings.policy().source / "_Attachments/image.png").exists()
+        ImageSync(store).once()
+        image_file = store.settings.policy().resolve("source", "_Attachments/image.png")
+        assert image_file.read_bytes() == output.getvalue()
+        del objects["notes/_Attachments/image.png"]
+        ImageSync(store).once()
+        assert not image_file.exists()
         assert not writes
     finally:
         server.shutdown()

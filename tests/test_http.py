@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import io
 import socket
 import threading
 import time
@@ -8,6 +10,7 @@ import pytest
 import uvicorn
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
+from PIL import Image
 
 from knowledge_mcp.knowledge import Knowledge
 from knowledge_mcp.server import create_app
@@ -66,7 +69,7 @@ async def test_initialization_runs_once_across_concurrent_requests(endpoint, lif
             async with streamable_http_client(url, http_client=http) as (read, write, _):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
-                    assert len((await session.list_tools()).tools) == 8
+                    assert len((await session.list_tools()).tools) == 9
                     result = await session.call_tool("get_status")
                     assert not result.isError
 
@@ -84,7 +87,7 @@ async def test_two_mcp_clients_search_save_read(endpoint, request_data):
                     initialized = await session.initialize()
                     assert "저장" in initialized.instructions
                     tools = await session.list_tools()
-                    assert len(tools.tools) == 8
+                    assert len(tools.tools) == 9
                     result = await session.call_tool("search_notes", {"query": "프리퀀시", "scope": "source"})
                     assert not result.isError
                     assert result.structuredContent["results"][0]["path"] == "실험.md"
@@ -125,6 +128,31 @@ async def test_mcp_html_continuation(endpoint, store):
                 assert data["next_start"] is None
                 assert "".join(pieces) == text
                 invalid = await session.call_tool("read_attachment", args | {"start": 0})
+                assert invalid.isError
+
+
+async def test_mcp_image_content_and_receipt(endpoint, store):
+    source = store.settings.policy().source
+    file = source / "_Attachments/screenshot.png"
+    file.parent.mkdir()
+    Image.new("RGB", (40, 20), "green").save(file)
+    (source / "image-ref.md").write_text("![[_Attachments/screenshot.png]]")
+    url, token = endpoint
+    async with httpx.AsyncClient(headers={"Authorization": "Bearer " + token}) as http:
+        async with streamable_http_client(url, http_client=http) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                args = {"path": "_Attachments/screenshot.png", "linked_from": "image-ref.md", "linked_vault": "source"}
+                result = await session.call_tool("read_image", args)
+                assert not result.isError
+                assert result.structuredContent["receipt"]
+                image = next(c for c in result.content if c.type == "image")
+                assert image.mimeType == "image/png"
+                with Image.open(io.BytesIO(base64.b64decode(image.data))) as preview:
+                    assert preview.size == (40, 20)
+                status = await session.call_tool("get_status")
+                assert "image_sync" in status.structuredContent["states"]
+                invalid = await session.call_tool("read_image", args | {"expected_hash": "stale"})
                 assert invalid.isError
 
 

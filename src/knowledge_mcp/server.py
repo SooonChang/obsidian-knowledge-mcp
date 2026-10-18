@@ -9,11 +9,12 @@ from typing import Any
 import uvicorn
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
-from mcp.types import ToolAnnotations
+from mcp.types import CallToolResult, ToolAnnotations
 from starlette.responses import JSONResponse
 
 from .attachments import read_attachment as attachment
 from .config import Settings
+from .images import read_image as image
 from .knowledge import Knowledge, SaveRequest
 from .semantic import hybrid_search
 from .storage import Store
@@ -25,7 +26,9 @@ INSTRUCTIONS = """업무 맥락이 필요한 질문에서는 get_context와 sear
 일회성 답변·대화 전문은 저장하지 않는다. 저장 시 근거와 이유를 명시하고 미확정 결정은 draft로 둔다.
 전체 대화가 서버에 자동 전달되지 않는다. 필요한 지식만 정리해 전달한다.
 필터: 1 반복 재사용, 2 인수인계 필수 맥락, 3 결정 근거·결정권자 추적, 4 실패·재시도 리스크,
-5 공통 규칙·디자인. 원문 확인에는 read_note/read_attachment의 receipt를 사용하고 실제 읽은 범위를 밝힌다.
+5 공통 규칙·디자인. 원문 확인에는 read_note/read_attachment/read_image의 receipt를 사용하고 실제 읽은 범위를 밝힌다.
+연결된 이미지는 read_image로 조회한다. 이미지는 축소된 첫 프레임이며 전체 원본 검증을 뜻하지 않는다.
+위키에는 이미지에서 얻은 설명과 원문 출처만 저장하고 이미지 파일이나 Base64를 복사하지 않는다.
 wiki.config.json·AGENTS.md·wiki-operations.md의 최신 규칙을 우선한다.
 save_knowledge의 expected_hash는 read_note 결과에서 가져오며 충돌 시 재조회한다.
 자동 저장이 성공하면 사용자에게 문서와 미확정 사항을 짧게 보고한다.
@@ -125,7 +128,7 @@ def create_app(settings: Settings):
     ) -> dict[str, Any]:
         """Read a current Markdown note, at most 400 lines. Returns version and evidence receipt."""
         if not path.lower().endswith(".md"):
-            raise ValueError("Use read_attachment for linked HTML/PDF")
+            raise ValueError("Use read_attachment for linked HTML/PDF or read_image for linked images")
         return await asyncio.to_thread(store.read, vault, path, start, end, section)
 
     @mcp.tool(annotations=readonly)
@@ -153,6 +156,20 @@ def create_app(settings: Settings):
             attachment, store, path, linked_from, linked_vault, page, start, max_chars, expected_hash
         )
 
+    @mcp.tool(annotations=readonly)
+    async def read_image(
+        path: str,
+        linked_from: str,
+        linked_vault: str = "wiki",
+        expected_hash: str | None = None,
+    ) -> CallToolResult:
+        """View an explicitly linked PNG/JPEG/WebP/GIF under attachments_dir.
+        Returns image content and a source receipt; no image is copied into the wiki.
+        Preview: first frame, at most 2048 px per side. No OCR verification.
+        Remote images await periodic synchronization if not yet available.
+        """
+        return await asyncio.to_thread(image, store, path, linked_from, linked_vault, expected_hash)
+
     @mcp.tool(
         annotations=ToolAnnotations(
             readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False
@@ -178,7 +195,8 @@ def create_app(settings: Settings):
             pending = settings.data_dir / "attachment-requests"
             return {
                 "states": {
-                    k: store.state(k) for k in ("index", "index_error", "source_sync", "git", "semantic")
+                    k: store.state(k)
+                    for k in ("index", "index_error", "source_sync", "image_sync", "git", "semantic")
                 },
                 "semantic_enabled": bool(settings.semantic.get("enabled")),
                 "pending_attachments": len(list(pending.glob("*.json"))) if pending.exists() else 0,

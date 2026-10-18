@@ -6,6 +6,16 @@
     knowledge-mcp --config config.toml lint
 
 get_status도 같은 운영 상태를 제공합니다.
+`image_sync`는 이미지 동기화 성공 여부·시각·파일 수를 별도로 제공합니다.
+이미지 동기화 중에는 `status=running`, `stage`와 `processed/total`, `downloaded`, `reused`가 표시됩니다.
+완료 시 `status=complete`, 실패 시 `status=failed`와 경로를 포함하지 않는 `code`·`message`를 기록합니다.
+확장자가 이미지 확장자이고 실제 내용도 PNG/JPEG/WebP/GIF 중 하나이면 형식이 달라도 허용합니다.
+원본 파일명과 내용은 유지하고 AI 조회 응답만 PNG 미리보기로 반환합니다.
+`invalid_image`는 손상·판독 불가 또는 지원하지 않는 실제 형식,
+`file_too_large`는 파일 크기 초과, `image_pixel_limit`는 픽셀 수 초과,
+`download_size_mismatch`는 전송 크기 불일치, `remote_changed`는 전송 도중 원격 변경입니다.
+실패한 파일의 `file_id`는 원문 상대 경로(UTF-8)의 SHA-256이며 실제 경로는 MCP나 로그에 출력하지 않습니다.
+오류가 발생하면 게시·삭제를 보류합니다. 원본 파일을 확인하거나 `exclude`로 제외한 뒤 다음 동기화를 기다립니다.
 원문 동기화 실패와 원문 부재, Git push 대기, 의미 검색 미준비를 구분합니다.
 worker 로그는 비밀 노출을 피하기 위해 오류 종류만 출력합니다.
 운영자가 진단할 때는 read-only rclone lsjson과 git status/fetch 등을 별도 실행하되 출력 공유에 주의합니다.
@@ -44,11 +54,13 @@ push 실패 시 로컬 commit은 보존됩니다. 기본 브랜치에 강제 pus
 복구 시 위키와 journal·요청 기록을 같은 백업 시점으로 복구합니다.
 검색 DB만 재구축하려면 index 명령을 사용합니다. 요청·receipt 기록까지 담긴 DB를 임의로 삭제하지 않습니다.
 소스 세대는 최신 세대 및 이전 세대를 일정 기간 유지하고, 성공한 동기화 후 오래된 서버 사본만 정리합니다.
+`/sources/images/`와 `images.json`은 최신 이미지 사본과 목록이며 세대별 백업이 아닙니다.
+원격 이미지 삭제는 정상 이미지 동기화 후 서버에도 반영됩니다. 이미지 과거 버전은 보존하지 않습니다.
 PC 원문이나 S3 원본에 삭제 명령을 실행하지 않습니다.
 
 ## 제한
 
-- 첨부 OCR·이미지 해석·HTML JavaScript 실행은 지원하지 않습니다.
+- 서버는 첨부 OCR·이미지 해석·HTML JavaScript를 실행하지 않습니다. `read_image`가 전달한 이미지의 해석은 클라이언트 AI가 수행합니다.
 - get_context는 운영 규칙을 제공하지만 임의 클라이언트가 이를 따르는지 강제하지 못합니다.
 - lint는 구조 검사이며 의미 충돌·사실 정확성·승인 여부는 사람이 또는 에이전트가 근거를 확인해야 합니다.
 - S3 요청 실패 시 마지막 정상 사본을 유지합니다. 경로·암호화 설정 변경은 자동 감지하지 못하므로 운영자가 worker를 중단하고 확인해야 합니다.

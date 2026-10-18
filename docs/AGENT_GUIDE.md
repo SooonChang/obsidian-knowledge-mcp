@@ -7,7 +7,7 @@ MCP 연결과 별개로 아래 규칙을 Codex·Claude Code 등의 사용자 규
 
 1. 업무 맥락이 관련되면 get_context로 문서 지도·운영 규칙·최근 로그를 읽는다.
 2. search_notes로 위키부터 찾고 관련 프로젝트·결정·리스크를 읽는다.
-3. 수치·현재 상태·원문 확인이 필요하면 get_sources → read_note 또는 read_attachment 순서로 읽는다.
+3. 수치·현재 상태·원문 확인이 필요하면 get_sources → read_note, read_attachment 또는 read_image로 읽는다.
 4. 원문과 위키의 차이, source_checked와 동기화 시각을 구분한다.
 5. 문서 전체가 아니라 일부만 읽었으면 확인한 범위를 밝힌다.
 6. 답변에 근거 경로와 확인 시점, 미확정 사항을 포함한다.
@@ -27,6 +27,19 @@ HTML은 추출된 본문 기준으로 한 번에 최대 16,000자를 반환한�
 `truncated=true`는 뒤에 읽을 본문이 남았다는 뜻이다. 읽는 도중 hash가 달라지면 처음부터 재조회한다.
 각 receipt는 해당 응답 범위만 확인했음을 뜻하므로 첫 구간만 읽고 전체 확인으로 보고하지 않는다.
 PDF는 기존처럼 `page`를 사용한다.
+
+`attachments_dir` 아래 PNG·JPEG·WebP·GIF는 `read_image`로 본다. 예:
+
+    {"path": "_Attachments/화면.png", "linked_from": "프로젝트/기록.md", "linked_vault": "source"}
+
+이미지에도 위와 동일한 명시적 링크·파일명 중복 검증을 적용한다. 응답에는 이미지 콘텐츠와
+원본 `hash`·`receipt`·확인 시각·원본/표시 크기가 포함된다. 이미지는 긴 변 최대 2,048px로 표시하고,
+애니메이션은 첫 프레임만 반환한다. receipt는 이 미리보기 범위에 대한 것이며 OCR이나 전체 원본 검증을 뜻하지 않는다.
+이미지 콘텐츠를 지원하는 클라이언트와 모델에서 해석하며 서버는 별도 OCR·비전 모델을 실행하지 않는다.
+S3 이미지가 아직 준비되지 않으면 `pending`을 반환하므로 다음 정기 동기화 후 다시 조회한다.
+재조회 시 `expected_hash`에 이전 해시를 전달하면 원본 변경을 확인할 수 있다.
+이미지에서 얻은 설명과 원문 상대 경로만 위키에 저장하고 이미지 파일·Base64·data URL은 복사하지 않는다.
+이미지를 출처로 추가하면 `source_receipts`에 receipt, `metadata.source`에 이미지 원문 경로를 전달한다.
 
 ## 자동 저장
 

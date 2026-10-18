@@ -181,7 +181,7 @@ class Knowledge:
                 for path in sources:
                     policy.resolve("source", path)
                     if path not in previous_sources and path not in receipts:
-                        raise ValueError("New source requires read_note/read_attachment receipt")
+                        raise ValueError("New source requires read_note/read_attachment/read_image receipt")
                 if sources and all(p in receipts for p in sources):
                     # A receipt may cover only a section: preserve its scope explicitly in the body.
                     meta["source_checked"] = min(
@@ -216,7 +216,11 @@ class Knowledge:
                     body += f"\n- {ev.kind}: {ev.reference} — {ev.summary}\n"
                 for path, r in receipts.items():
                     if path in sources:
-                        body += f"\n- 원문 {path}, 확인 {r['checked_at']}, 범위 {r['start']}–{r['end']}; 전체 검증을 뜻하지 않음.\n"
+                        scope = (
+                            "이미지 첫 프레임 미리보기(긴 변 최대 2048px), OCR 검증 없음"
+                            if policy.is_image(path) else f"범위 {r['start']}–{r['end']}"
+                        )
+                        body += f"\n- 원문 {path}, 확인 {r['checked_at']}, {scope}; 전체 검증을 뜻하지 않음.\n"
                 if request.related:
                     body += (
                         "\n## 관련 문서\n"
