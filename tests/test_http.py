@@ -178,3 +178,21 @@ def test_http_auth_and_origin(endpoint):
         },
     )
     assert response.status_code == 403
+
+
+def test_refresh_index_records_time_and_clears_on_success(store, monkeypatch):
+    from filelock import Timeout
+
+    from knowledge_mcp.server import refresh_index
+
+    def blocked(self, *args, **kwargs):
+        raise Timeout("writer.lock")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Store, "reindex", blocked)
+        refresh_index(store)
+    error = store.state("index_error")
+    assert error["error"] == "Timeout" and error["at"]
+
+    refresh_index(store)
+    assert store.state("index_error") is None

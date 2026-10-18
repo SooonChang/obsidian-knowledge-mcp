@@ -17,7 +17,7 @@ from .config import Settings
 from .images import read_image as image
 from .knowledge import Knowledge, SaveRequest
 from .semantic import hybrid_search
-from .storage import Store
+from .storage import Store, now
 
 INSTRUCTIONS = """업무 맥락이 필요한 질문에서는 get_context와 search_notes로 위키를 먼저 확인한다.
 정확한 수치·현재 상태·근거가 필요하면 get_sources와 read_note로 원문을 읽는다.
@@ -51,6 +51,16 @@ class BearerMiddleware:
         return await self.app(scope, receive, send)
 
 
+def refresh_index(store: Store):
+    # index_error describes only the latest periodic attempt.
+    try:
+        store.reindex()
+    except Exception as exc:
+        store.state("index_error", {"error": type(exc).__name__, "at": now()})
+    else:
+        store.clear_state("index_error")
+
+
 def create_app(settings: Settings):
     token = settings.token()
     store, knowledge = Store(settings), None
@@ -64,10 +74,7 @@ def create_app(settings: Settings):
         async def refresh():
             while True:
                 await asyncio.sleep(60)
-                try:
-                    await asyncio.to_thread(store.reindex)
-                except Exception as exc:
-                    store.state("index_error", {"error": type(exc).__name__})
+                await asyncio.to_thread(refresh_index, store)
 
         task = asyncio.create_task(refresh())
         try:

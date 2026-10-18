@@ -126,6 +126,10 @@ class Store:
             row = db.execute("SELECT value FROM states WHERE key=?", (key,)).fetchone()
             return json.loads(row[0]) if row else None
 
+    def clear_state(self, key: str):
+        with self.db() as db:
+            db.execute("DELETE FROM states WHERE key=?", (key,))
+
     def remove(self, db, vault, path):
         ids = [r[0] for r in db.execute("SELECT id FROM chunks WHERE vault=? AND path=?", (vault, path))]
         for ident in ids:
