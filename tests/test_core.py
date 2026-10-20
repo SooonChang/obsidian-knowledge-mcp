@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from knowledge_mcp.attachments import read_attachment
-from knowledge_mcp.knowledge import Knowledge, SaveRequest
+from knowledge_mcp.knowledge import Knowledge, SaveRequest, note_path
 from knowledge_mcp.semantic import hybrid_search
 from knowledge_mcp.storage import Store, chunks, split_frontmatter
 
@@ -135,6 +135,23 @@ def test_save_idempotent_and_source_unchanged(store, request_data):
     assert log.count("request_001") == 1
     assert store.keyword("프리퀀시", "wiki")
     assert "frequency" in (store.settings.wiki_root / "AI-Sessions/index.md").read_text("utf-8")
+
+
+@pytest.mark.parametrize("related", ["AI-Sessions/wiki/projects/app", "AI-Sessions/wiki/projects/app.md"])
+def test_related_accepts_wikilink_target_without_suffix(store, request_data, related):
+    project = store.settings.wiki_root / "AI-Sessions/wiki/projects/app.md"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text("# 앱", encoding="utf-8")
+    request_data["related"] = [related]
+    assert Knowledge(store).save(SaveRequest(**request_data))["saved"]
+    saved = store.settings.wiki_root / request_data["changes"][0]["path"]
+    assert "- [[AI-Sessions/wiki/projects/app]]" in saved.read_text("utf-8")
+
+
+def test_missing_related_note_reports_wiki_path(store, request_data):
+    request_data["related"] = ["AI-Sessions/wiki/projects/missing"]
+    with pytest.raises(ValueError, match="Related wiki note not found: AI-Sessions/wiki/projects/missing.md"):
+        Knowledge(store).save(SaveRequest(**request_data))
 
 
 def test_filter_rejected_without_log(store, request_data):
@@ -290,3 +307,40 @@ def test_reindex_missing_source_preserves_wiki(store):
     result = store.reindex()
     assert "source" in result["errors"]
     assert "wiki" in result["counts"]
+
+
+def test_body_links_outside_wiki_warn_instead_of_failing(store, request_data):
+    request_data["changes"][0]["body"] = (
+        "# 프리퀀시\n\n[[2.Projects/app-ml 배치 명령어]]와 ![[화면.png]] 참고. `[[inline-example]]`\n\n"
+        "```yaml\nlink:\n  - \"[[code-example]]\"\n```\n"
+    )
+    result = Knowledge(store).save(SaveRequest(**request_data))
+    assert result["saved"]
+    assert [w["target"] for w in result["warnings"]] == ["2.Projects/app-ml 배치 명령어", "화면.png"]
+    issues = Knowledge(store).lint()["issues"]
+    targets = {i["target"] for i in issues if i["problem"] == "unresolved link"}
+    assert targets == {"2.Projects/app-ml 배치 명령어", "화면.png"}
+
+
+@pytest.mark.parametrize("reference", ["AI-Sessions/index", "AI-Sessions/index.md", "wiki.config.json"])
+def test_wiki_evidence_accepts_wikilink_target(store, request_data, reference):
+    request_data["evidence"].append({"kind": "wiki", "reference": reference, "summary": "기존 문서"})
+    assert Knowledge(store).save(SaveRequest(**request_data))["saved"]
+
+
+def test_missing_wiki_evidence_reports_wiki_path(store, request_data):
+    request_data["evidence"].append({"kind": "wiki", "reference": "AI-Sessions/missing", "summary": "없음"})
+    with pytest.raises(ValueError, match="Wiki evidence not found: AI-Sessions/missing$"):
+        Knowledge(store).save(SaveRequest(**request_data))
+
+
+def test_note_path_and_missing_note_error_hide_server_paths(store):
+    assert note_path(" AI-Sessions/index ") == "AI-Sessions/index.md"
+    assert note_path("AI-Sessions/index.md") == "AI-Sessions/index.md"
+    with pytest.raises(ValueError, match="read_attachment"):
+        note_path("보고서.html")
+    assert store.read("wiki", note_path("AI-Sessions/index"))["path"] == "AI-Sessions/index.md"
+    with pytest.raises(FileNotFoundError) as error:
+        store.read("wiki", "AI-Sessions/missing.md")
+    assert str(error.value) == "Not found in wiki vault: AI-Sessions/missing.md"
+    assert str(store.settings.wiki_root) not in str(error.value)

@@ -3,6 +3,8 @@ from urllib.parse import quote
 import pytest
 
 from knowledge_mcp.attachments import read_attachment
+from knowledge_mcp.knowledge import Knowledge, SaveRequest
+from knowledge_mcp.storage import digest
 from knowledge_mcp.sync import SourceSync
 
 
@@ -204,3 +206,36 @@ def test_filename_link_uses_remote_manifest_before_download(store, tmp_path, mon
         sync.attachment(path)
         result = read_attachment(store, "report.html", "referring.md", "source")
         assert (result["path"], result["content"]) == (path, "remote report")
+
+
+def test_listed_attachment_source_stays_available_before_download(store, tmp_path, monkeypatch, request_data):
+    store.settings.snapshot_dir = tmp_path / "snapshots"
+    store.settings.source_sync = {"enabled": True, "remote": "notes:bucket/vault"}
+    remote = {"referring.md": b"[[report.html]]", "_Attachments/report.html": b"<p>report</p>"}
+    metadata = {path: {"size": len(data), "mtime": "unchanged"} for path, data in remote.items()}
+    monkeypatch.setattr(SourceSync, "listing", lambda self: metadata)
+    monkeypatch.setattr(
+        SourceSync, "download", lambda self, path, dest, expected: dest.write_bytes(remote[path])
+    )
+    SourceSync(store).once()
+    path = "_Attachments/report.html"
+    assert not (store.settings.policy().source / path).exists()
+    note = store.settings.wiki_root / request_data["changes"][0]["path"]
+    note.parent.mkdir(parents=True, exist_ok=True)
+    note.write_text(
+        "---\ntype: concept\nstatus: active\nsource:\n- " + path + "\nsource_checked: '2026-10-01'\n---\n\n# 이전\n",
+        encoding="utf-8",
+    )
+    request_data["changes"][0]["expected_hash"] = digest(note.read_bytes())
+    knowledge = Knowledge(store)
+    assert knowledge.save(SaveRequest(**request_data))["saved"]
+    wiki_path = request_data["changes"][0]["path"].removesuffix(".md")
+    assert knowledge.sources(wiki_path) == [
+        {"path": path, "available": True, "downloaded": False, "source_checked": "2026-10-01"}
+    ]
+    assert not [i for i in knowledge.lint()["issues"] if i["problem"] == "source unavailable"]
+    note.write_text(note.read_text("utf-8").replace(path, "_Attachments/missing.html"), encoding="utf-8")
+    request_data["request_id"] = "missing_source_request"
+    request_data["changes"][0]["expected_hash"] = digest(note.read_bytes())
+    with pytest.raises(ValueError, match="Source not found: _Attachments/missing.html"):
+        knowledge.save(SaveRequest(**request_data))

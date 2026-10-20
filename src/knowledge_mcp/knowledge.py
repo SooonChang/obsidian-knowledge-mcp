@@ -9,6 +9,7 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, Field
 
+from .config import IMAGE_EXTENSIONS
 from .storage import Store, atomic_write, digest, local_date, now, split_frontmatter
 
 PREFIXES = {
@@ -27,6 +28,26 @@ SECRET = re.compile(
     r"(?im:^\s*(?:password|api[_-]?key|secret[_-]?key|access[_-]?token)\s*[:=]\s*\S{8,})"
 )
 LINK = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]")
+ATTACHMENT_EXTENSIONS = (".html", ".htm", ".pdf") + IMAGE_EXTENSIONS
+
+
+def note_path(path: str) -> str:
+    """Accept a wikilink target for a note; the .md suffix is optional."""
+    path = path.strip()
+    if path.lower().endswith(ATTACHMENT_EXTENSIONS):
+        raise ValueError("Use read_attachment for linked HTML/PDF or read_image for linked images")
+    return path if path.endswith(".md") else path + ".md"
+
+
+def note_links(text: str) -> list[str]:
+    """Wikilink targets outside code, where links are only examples."""
+    lines, fence = [], False
+    for line in text.splitlines():
+        if line.lstrip().startswith(("```", "~~~")):
+            fence = not fence
+        elif not fence:
+            lines.append(re.sub(r"`[^`]*`", "", line))
+    return [link.strip() for link in LINK.findall("\n".join(lines))]
 
 
 class Change(BaseModel):
@@ -128,12 +149,20 @@ class Knowledge:
             requested_paths = {c.path for c in request.changes}
             if len(requested_paths) != len(request.changes):
                 raise ValueError("Duplicate change path")
+            warnings = []
             for path in request.related:
-                if path not in requested_paths:
-                    policy.resolve("wiki", path)
+                path = note_path(path)
+                if path not in requested_paths and not policy.resolve("wiki", path, exists=False).is_file():
+                    raise ValueError("Related wiki note not found: " + path)
             for evidence in request.evidence:
                 if evidence.kind == "wiki":
-                    policy.resolve("wiki", evidence.reference)
+                    # Usually a note wikilink, but wiki files such as wiki.config.json are valid too.
+                    path = evidence.reference.strip()
+                    candidates = {path} if path.endswith(".md") else {path, path + ".md"}
+                    if not candidates & requested_paths and not any(
+                        policy.resolve("wiki", p, exists=False).is_file() for p in candidates
+                    ):
+                        raise ValueError("Wiki evidence not found: " + path)
                 if evidence.kind == "url" and not evidence.reference.startswith(("https://", "http://")):
                     raise ValueError("Invalid URL evidence")
             for change in request.changes:
@@ -179,7 +208,9 @@ class Knowledge:
                     [previous_sources] if isinstance(previous_sources, str) else previous_sources
                 )
                 for path in sources:
-                    policy.resolve("source", path)
+                    # On-demand attachments stay valid sources before they are downloaded.
+                    if not policy.source_available(path):
+                        raise ValueError("Source not found: " + path)
                     if path not in previous_sources and path not in receipts:
                         raise ValueError("New source requires read_note/read_attachment/read_image receipt")
                 if sources and all(p in receipts for p in sources):
@@ -198,10 +229,16 @@ class Knowledge:
                         raise ValueError("Cannot advance source_checked without reading every source")
                 elif "source_checked" in meta:
                     raise ValueError("source_checked without source")
-                for linked in LINK.findall(change.body):
-                    linked = linked if linked.endswith(".md") else linked + ".md"
-                    if linked not in requested_paths:
+                # Links to source notes, attachments or bare filenames are valid in Obsidian;
+                # report them instead of rejecting the whole save.
+                for target in note_links(change.body):
+                    linked = target if target.endswith(".md") else target + ".md"
+                    if linked in requested_paths:
+                        continue
+                    try:
                         policy.resolve("wiki", linked)
+                    except (ValueError, OSError):
+                        warnings.append({"path": change.path, "problem": "unresolved link", "target": target})
                 meta.update(
                     type=typ,
                     status=status,
@@ -259,6 +296,8 @@ class Knowledge:
                 "git": "pending" if self.store.settings.git.get("enabled") else "disabled",
                 "semantic_validation": "agent-provided evidence; structural checks only",
             }
+            if warnings:
+                result["warnings"] = warnings
             job = {
                 "id": request.request_id,
                 "fingerprint": fingerprint,
@@ -276,14 +315,18 @@ class Knowledge:
 
     def sources(self, wiki_path):
         policy = self.store.settings.policy()
-        meta, _, _ = split_frontmatter(policy.resolve("wiki", wiki_path).read_text("utf-8-sig"))
+        meta, _, _ = split_frontmatter(policy.resolve("wiki", note_path(wiki_path)).read_text("utf-8-sig"))
         paths = meta.get("source", [])
         paths = [paths] if isinstance(paths, str) else paths
         result = []
         for p in paths:
             try:
-                file = policy.resolve("source", p)
-                item = {"path": p, "available": True, "mtime": file.stat().st_mtime}
+                file = policy.resolve("source", p, exists=False)
+                if file.is_file():
+                    item = {"path": p, "available": True, "mtime": file.stat().st_mtime}
+                else:
+                    # Listed attachments download when read_attachment/read_image is called.
+                    item = {"path": p, "available": policy.source_available(p), "downloaded": False}
             except (ValueError, OSError):
                 item = {"path": p, "available": False}
             result.append(item | {"source_checked": str(meta.get("source_checked", ""))})
@@ -305,7 +348,7 @@ class Knowledge:
                     issues.append({"path": path, "problem": "invalid save_filter"})
                 if meta.get("source") and not meta.get("source_checked"):
                     issues.append({"path": path, "problem": "missing source_checked"})
-                for linked in LINK.findall(text):
+                for linked in note_links(text):
                     try:
                         policy.resolve("wiki", linked if linked.endswith(".md") else linked + ".md")
                     except (ValueError, OSError):

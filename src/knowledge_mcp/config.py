@@ -138,6 +138,16 @@ class VaultPolicy:
         file = self.snapshot_dir / "images.json"
         return json.loads(file.read_text("utf-8")) if file.exists() else {}
 
+    def source_available(self, path: str) -> bool:
+        """Whether a source file is local or published in the listing for on-demand download."""
+        if self.resolve("source", path, exists=False).is_file():
+            return True
+        if not self.snapshot_dir:
+            return False
+        pointer = self.snapshot_dir / "current.json"
+        listed = json.loads(pointer.read_text("utf-8")).get("files", {}) if pointer.exists() else {}
+        return path in listed or path in self.image_manifest().get("files", {})
+
     def resolve(self, vault: str, path: str, *, exists=True) -> Path:
         if not self.allowed(vault, path):
             raise ValueError("Path is outside the allowed vault scope")
@@ -158,7 +168,11 @@ class VaultPolicy:
                 raise ValueError("Linked filesystem paths are forbidden")
             if current.exists() and getattr(current.stat(), "st_file_attributes", 0) & 2:
                 raise ValueError("Hidden filesystem paths are forbidden")
-        resolved = current.resolve(strict=exists)
+        try:
+            resolved = current.resolve(strict=exists)
+        except FileNotFoundError:
+            # Report the vault-relative path, never the server's filesystem layout.
+            raise FileNotFoundError(f"Not found in {vault} vault: {path}") from None
         if not resolved.is_relative_to(root.resolve()):
             raise ValueError("Path escapes vault")
         if vault == "source" and resolved.is_relative_to(self.wiki):
