@@ -4,6 +4,7 @@ import base64
 import json
 import re
 from datetime import datetime, timedelta, timezone
+from pathlib import PurePosixPath
 from typing import Literal
 
 import yaml
@@ -37,6 +38,22 @@ def note_path(path: str) -> str:
     if path.lower().endswith(ATTACHMENT_EXTENSIONS):
         raise ValueError("Use read_attachment for linked HTML/PDF or read_image for linked images")
     return path if path.endswith(".md") else path + ".md"
+
+
+def find_note(policy, vault: str, path: str) -> str:
+    """Resolve a filename-only wikilink target to its unique note, as Obsidian does."""
+    path = note_path(path)
+    if "/" in path or policy.resolve(vault, path, exists=False).is_file():
+        return path
+    matches = sorted(p for p, _ in policy.notes(vault) if PurePosixPath(p).name == path)
+    if len(matches) > 1:
+        raise ValueError("Ambiguous note filename; use one of: " + ", ".join(matches[:10]))
+    return matches[0] if matches else path
+
+
+def index_link(stem: str) -> re.Pattern:
+    """Match a wikilink to exactly this note, not to notes sharing its prefix."""
+    return re.compile(r"\[\[" + re.escape(stem) + r"(?:[|#][^\]]*)?\]\]")
 
 
 def note_links(text: str) -> list[str]:
@@ -274,12 +291,13 @@ class Knowledge:
                 stem = path.removesuffix(".md")
                 new_meta = split_frontmatter(changes[path][1].decode())[0]
                 status_tag = f"[status:{new_meta['status']}]"
-                if f"[[{stem}" not in index_text:
+                linked = index_link(stem)
+                if not linked.search(index_text):
                     index_text += f"\n- [[{stem}]]: {request.reason.replace(chr(10), ' ')} {status_tag}\n"
                 else:
                     lines = index_text.splitlines()
                     for i, line in enumerate(lines):
-                        if f"[[{stem}]]" in line or f"[[{stem}|" in line:
+                        if linked.search(line):
                             lines[i] = re.sub(r"\s*\[status:[^\]]+\]", "", line) + " " + status_tag
                     index_text = "\n".join(lines) + "\n"
             changes[index_path] = (digest(index), index_text.encode())
@@ -353,7 +371,7 @@ class Knowledge:
                         policy.resolve("wiki", linked if linked.endswith(".md") else linked + ".md")
                     except (ValueError, OSError):
                         issues.append({"path": path, "problem": "unresolved link", "target": linked})
-                if path.removesuffix(".md") not in index:
+                if not index_link(path.removesuffix(".md")).search(index):
                     issues.append({"path": path, "problem": "not directly indexed; check topic map"})
                 if SECRET.search(text):
                     issues.append({"path": path, "problem": "possible credential; value omitted"})

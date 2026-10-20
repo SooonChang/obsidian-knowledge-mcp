@@ -97,6 +97,9 @@ def linked_attachment(store: Store, policy: VaultPolicy, path: str, linked_from:
             # Before the image listing is published, a filename link can only
             # yield pending. read_image checks the manifest before serving bytes.
             exact = path not in policy.image_manifest().get("files", {})
+        if not matches and not exact:
+            # The note does link this filename; the file itself is absent from the vault.
+            raise FileNotFoundError("Linked attachment not found in source vault: " + path)
     if not exact:
         raise ValueError("Attachment must be explicitly linked by the referring note")
     return path, source_path

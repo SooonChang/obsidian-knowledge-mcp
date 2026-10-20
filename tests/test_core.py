@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from knowledge_mcp.attachments import read_attachment
-from knowledge_mcp.knowledge import Knowledge, SaveRequest, note_path
+from knowledge_mcp.knowledge import Knowledge, SaveRequest, find_note, note_path
 from knowledge_mcp.semantic import hybrid_search
 from knowledge_mcp.storage import Store, chunks, split_frontmatter
 
@@ -344,3 +344,29 @@ def test_note_path_and_missing_note_error_hide_server_paths(store):
         store.read("wiki", "AI-Sessions/missing.md")
     assert str(error.value) == "Not found in wiki vault: AI-Sessions/missing.md"
     assert str(store.settings.wiki_root) not in str(error.value)
+
+
+def test_find_note_resolves_unique_filename_link(store):
+    policy = store.settings.policy()
+    for path in ("projects/a/app-ml 배치 명령어.md", "projects/a/중복.md", "projects/b/중복.md", "루트.md"):
+        (policy.source / path).parent.mkdir(parents=True, exist_ok=True)
+        (policy.source / path).write_text("# 노트", encoding="utf-8")
+    assert find_note(policy, "source", "app-ml 배치 명령어") == "projects/a/app-ml 배치 명령어.md"
+    assert find_note(policy, "source", "루트") == "루트.md"
+    assert find_note(policy, "source", "projects/b/중복") == "projects/b/중복.md"
+    assert find_note(policy, "source", "없는노트") == "없는노트.md"
+    with pytest.raises(ValueError, match="projects/a/중복.md, projects/b/중복.md"):
+        find_note(policy, "source", "중복")
+    note = store.read("source", find_note(policy, "source", "app-ml 배치 명령어"))
+    assert note["path"] == "projects/a/app-ml 배치 명령어.md"
+
+
+def test_index_entry_added_when_only_prefix_sibling_is_indexed(store, request_data):
+    index = store.settings.wiki_root / "AI-Sessions/index.md"
+    index.write_text("# 지도\n- [[AI-Sessions/wiki/concepts/frequency-v2]]: 다른 문서\n", encoding="utf-8")
+    Knowledge(store).save(SaveRequest(**request_data))
+    text = index.read_text("utf-8")
+    assert "- [[AI-Sessions/wiki/concepts/frequency]]: " in text
+    assert "frequency-v2]]: 다른 문서\n" in text
+    issues = Knowledge(store).lint()["issues"]
+    assert not [i for i in issues if i["path"] == request_data["changes"][0]["path"]]

@@ -90,6 +90,8 @@ save_knowledge 입력 구조 예시:
 source, concept, decision, error, project, design, dev-task, handoff 유형을 지원한다.
 전체 경로의 위키 링크를 사용한다. source_checked·날짜·인덱스·로그는 서버가 검증하거나 갱신한다.
 `related`, `kind: "wiki"` 근거, read_note·get_sources의 노트 경로는 위키링크처럼 `.md`를 생략해도 된다.
+read_note는 `[[app-ml 배치 명령어]]` 같은 파일명만 있는 링크도 같은 이름의 노트가 하나면 읽는다.
+응답의 `path`는 해석된 전체 경로이며, 같은 이름이 여러 개면 오류에 후보 경로가 표시된다.
 `related`는 서버가 본문 끝에 `## 관련 문서`로 추가하므로 본문에 같은 섹션을 중복해 쓰지 않는다.
 본문에서 위키 밖(원문 노트·첨부·파일명만)을 가리키는 링크는 저장을 막지 않고 응답 `warnings`로 알린다.
 코드 블록과 인라인 코드 안의 `[[...]]`는 예시로 보고 확인하지 않는다.

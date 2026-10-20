@@ -15,7 +15,7 @@ from starlette.responses import JSONResponse
 from .attachments import read_attachment as attachment
 from .config import Settings
 from .images import read_image as image
-from .knowledge import Knowledge, SaveRequest, note_path
+from .knowledge import Knowledge, SaveRequest, find_note
 from .semantic import hybrid_search
 from .storage import Store, now
 
@@ -134,9 +134,14 @@ def create_app(settings: Settings):
         vault: str, path: str, start: int = 1, end: int | None = None, section: str | None = None
     ) -> dict[str, Any]:
         """Read a current Markdown note, at most 400 lines. Returns version and evidence receipt.
-        path may omit .md, as in a wikilink target.
+        path may omit .md, as in a wikilink target. A bare filename such as [[note]] resolves
+        to the unique note with that name; the response path is the resolved full path.
         """
-        return await asyncio.to_thread(store.read, vault, note_path(path), start, end, section)
+
+        def read():
+            return store.read(vault, find_note(settings.policy(), vault, path), start, end, section)
+
+        return await asyncio.to_thread(read)
 
     @mcp.tool(annotations=readonly)
     async def get_sources(wiki_path: str) -> list[dict[str, Any]]:

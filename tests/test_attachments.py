@@ -239,3 +239,11 @@ def test_listed_attachment_source_stays_available_before_download(store, tmp_pat
     request_data["changes"][0]["expected_hash"] = digest(note.read_bytes())
     with pytest.raises(ValueError, match="Source not found: _Attachments/missing.html"):
         knowledge.save(SaveRequest(**request_data))
+
+
+@pytest.mark.parametrize("requested", ["missing.html", "_Attachments/missing.html"])
+def test_linked_but_missing_attachment_reports_not_found(store, requested):
+    source = store.settings.policy().source
+    (source / "referring.md").write_text("![[missing.html]]", encoding="utf-8")
+    with pytest.raises(FileNotFoundError, match="Linked attachment not found in source vault: " + requested):
+        read_attachment(store, requested, "referring.md", "source")
