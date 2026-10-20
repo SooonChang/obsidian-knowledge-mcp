@@ -1,4 +1,5 @@
 import json
+import shutil
 import subprocess
 
 import pytest
@@ -44,9 +45,26 @@ def test_source_snapshots_and_delete(store, tmp_path, monkeypatch):
     assert not (first / ".secret.md").exists()
     sync.attachment("report.pdf")
     assert (first / "report.pdf").read_bytes() == remote["report.pdf"]
+    unchanged = {"note.md": b"# unchanged"}
+    remote.update(unchanged)
+    sync.once()
+    shared = store.settings.policy().source
     remote["a.md"] = "# 바뀐 지식".encode()
     sync.once()
-    assert (store.settings.policy().source / "report.pdf").read_bytes() == remote["report.pdf"]
+    current = store.settings.policy().source
+    assert (current / "report.pdf").read_bytes() == remote["report.pdf"]
+    # Unchanged files share data with earlier generations instead of being copied.
+    assert (current / "report.pdf").stat().st_ino == (first / "report.pdf").stat().st_ino
+    assert (current / "note.md").stat().st_ino == (shared / "note.md").stat().st_ino
+    assert (current / "a.md").stat().st_ino != (shared / "a.md").stat().st_ino
+    manifest = json.loads((store.settings.snapshot_dir / "current.json").read_text())
+    assert manifest["hashes"]["note.md"] == digest(unchanged["note.md"])
+    assert manifest["hashes"]["report.pdf"] == digest(remote["report.pdf"])
+    # Pruning an earlier generation removes only its names, not shared data.
+    shutil.rmtree(first)
+    shutil.rmtree(shared)
+    assert (current / "report.pdf").read_bytes() == remote["report.pdf"]
+    assert (current / "note.md").read_bytes() == unchanged["note.md"]
     assert store.keyword("바뀐", "source")
     del remote["a.md"]
     sync.once()

@@ -112,8 +112,15 @@ class SourceSync:
                     and not previous.is_symlink()
                 ):
                     target.parent.mkdir(parents=True, exist_ok=True)
-                    # Retain on-demand attachments when their remote metadata is unchanged.
-                    target.write_bytes(previous.read_bytes())
+                    # Retain unchanged notes and on-demand attachments. Files are never
+                    # modified in place, so generations can share data via hard links.
+                    try:
+                        os.link(previous, target)
+                    except OSError:
+                        target.write_bytes(previous.read_bytes())
+                    if path in old.get("hashes", {}):
+                        manifest["hashes"][path] = old["hashes"][path]
+                        continue
                 elif markdown:
                     self.download(path, target, metadata)
                 else:
