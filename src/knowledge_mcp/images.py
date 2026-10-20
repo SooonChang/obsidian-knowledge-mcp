@@ -62,9 +62,9 @@ def read_image(
     # Publication, deletion and receipt validation share the wiki writer lock.
     with store.lock:
         policy = store.settings.policy()
+        path, file = linked_attachment(store, policy, path, linked_from, linked_vault)
         if not policy.is_image(path):
             raise ValueError("Image must be a supported file under attachments_dir")
-        file = linked_attachment(store, policy, path, linked_from, linked_vault)
         metadata = policy.image_manifest().get("files", {}).get(path) if policy.snapshot_dir else None
         if policy.snapshot_dir and (not metadata or not file.exists()):
             return _result({"path": path, "pending": True, "reason": "Image awaits periodic synchronization"})

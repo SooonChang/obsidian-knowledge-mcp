@@ -154,6 +154,8 @@ def create_app(settings: Settings):
         expected_hash: str | None = None,
     ) -> dict[str, Any]:
         """Read explicitly linked HTML or text PDF. No JavaScript or OCR execution.
+        path: vault-relative path, or the bare filename written in the note's wikilink
+        (e.g. report.html for ![[report.html]]); the response path is the resolved full path.
         HTML: start is a 1-based position in extracted text; max_chars is 1..16000.
         Continue with start=next_start and expected_hash=hash until next_start is null.
         total_characters is the full extracted length; receipts cover only the returned range.
@@ -171,6 +173,7 @@ def create_app(settings: Settings):
         expected_hash: str | None = None,
     ) -> CallToolResult:
         """View an explicitly linked PNG/JPEG/WebP/GIF under attachments_dir.
+        path: vault-relative path, or the bare filename written in the note's wikilink.
         Returns image content and a source receipt; no image is copied into the wiki.
         Preview: first frame, at most 2048 px per side. No OCR verification.
         Remote images await periodic synchronization if not yet available.

@@ -54,7 +54,10 @@ def _filename_matches(store: Store, policy: VaultPolicy, name: str) -> set[str]:
 
 
 def linked_attachment(store: Store, policy: VaultPolicy, path: str, linked_from: str, linked_vault: str):
-    """Validate an explicit note link and return its allowed source path."""
+    """Validate an explicit note link and return its vault-relative and allowed source paths.
+
+    A bare filename written in a referring wikilink resolves to its unique vault-relative path.
+    """
     referring = policy.resolve(linked_vault, linked_from).read_text("utf-8-sig")
     meta, _, _ = split_frontmatter(referring)
     sources = meta.get("source", [])
@@ -65,6 +68,16 @@ def linked_attachment(store: Store, policy: VaultPolicy, path: str, linked_from:
     # Filename-only wikilinks need unique resolution, even if a root file matches.
     short_links = {x for x in wiki_links if "/" not in x and "\\" not in x and ":" not in x}
     references = {unquote(x.strip("<>")) for x in links} | set(sources) | (wiki_links - short_links)
+    matches = None
+    if path in short_links and path not in references:
+        # Agents only see the link text; map it to the single allowed file Obsidian would open.
+        matches = _filename_matches(store, policy, path)
+        if len(matches) > 1:
+            raise ValueError(
+                "Ambiguous attachment filename; use a vault-relative path in the referring wikilink"
+            )
+        if matches:
+            path = next(iter(matches))
     source_path = policy.resolve("source", path, exists=False)
     exact = path in references
     if linked_vault == "source":
@@ -73,7 +86,8 @@ def linked_attachment(store: Store, policy: VaultPolicy, path: str, linked_from:
                 candidate = posixpath.normpath(str(PurePosixPath(linked_from).parent / link))
                 exact |= candidate == path
     if not exact and source_path.name in short_links:
-        matches = _filename_matches(store, policy, source_path.name)
+        if matches is None:
+            matches = _filename_matches(store, policy, source_path.name)
         if path in matches and len(matches) > 1:
             raise ValueError(
                 "Ambiguous attachment filename; use a vault-relative path in the referring wikilink"
@@ -85,7 +99,7 @@ def linked_attachment(store: Store, policy: VaultPolicy, path: str, linked_from:
             exact = path not in policy.image_manifest().get("files", {})
     if not exact:
         raise ValueError("Attachment must be explicitly linked by the referring note")
-    return source_path
+    return path, source_path
 
 
 def read_attachment(
@@ -103,7 +117,7 @@ def read_attachment(
     if not 1 <= max_chars <= MAX_ATTACHMENT_CHARACTERS:
         raise ValueError(f"max_chars must be 1..{MAX_ATTACHMENT_CHARACTERS}")
     policy = store.settings.policy()
-    source_path = linked_attachment(store, policy, path, linked_from, linked_vault)
+    path, source_path = linked_attachment(store, policy, path, linked_from, linked_vault)
     if source_path.suffix.lower() not in (".pdf", ".html", ".htm"):
         raise ValueError("Only linked HTML and text PDF are supported; no OCR")
     if source_path.suffix.lower() == ".pdf" and (start != 1 or max_chars != MAX_ATTACHMENT_CHARACTERS):

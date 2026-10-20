@@ -213,11 +213,17 @@ def test_remote_short_link_duplicates_and_symlink_rejected(store, image_remote, 
     remote["_Attachments/duplicate/test.png"] = picture("blue")
     SourceSync(store).once()
     ImageSync(store).once()
-    with pytest.raises(ValueError, match="Ambiguous"):
-        read_image(store, "_Attachments/nested/test.png", "note.md", "source")
+    for requested in ("_Attachments/nested/test.png", "test.png"):
+        with pytest.raises(ValueError, match="Ambiguous"):
+            read_image(store, requested, "note.md", "source")
     del remote["_Attachments/duplicate/test.png"]
     ImageSync(store).once()
     assert read_image(store, "_Attachments/nested/test.png", "note.md", "source").content[1].type == "image"
+    result = read_image(store, "test.png", "note.md", "source")
+    assert result.structuredContent["path"] == "_Attachments/nested/test.png"
+    with store.db() as db:
+        receipt = db.execute("SELECT path FROM receipts WHERE id=?", (result.structuredContent["receipt"],))
+        assert receipt.fetchone()["path"] == "_Attachments/nested/test.png"
     file = store.settings.policy().resolve("source", "_Attachments/nested/test.png")
     file.unlink()
     outside = tmp_path / "outside.png"

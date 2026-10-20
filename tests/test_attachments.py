@@ -114,7 +114,8 @@ def test_pdf_page_behavior_is_preserved(store, monkeypatch):
         f"[[{quote('보고서.html')}]]",
     ],
 )
-def test_filename_wikilink_reads_unique_attachment(store, vault, link):
+@pytest.mark.parametrize("requested", ["_Attachments/보고서.html", "보고서.html"])
+def test_filename_wikilink_reads_unique_attachment(store, vault, link, requested):
     policy = store.settings.policy()
     attachment = policy.source / "_Attachments/보고서.html"
     attachment.parent.mkdir()
@@ -123,7 +124,7 @@ def test_filename_wikilink_reads_unique_attachment(store, vault, link):
     note = root / "notes/referring.md"
     note.parent.mkdir()
     note.write_text(link, encoding="utf-8")
-    result = read_attachment(store, "_Attachments/보고서.html", "notes/referring.md", vault)
+    result = read_attachment(store, requested, "notes/referring.md", vault)
     assert result["content"] == "분석 결과"
     assert result["path"] == "_Attachments/보고서.html"
     with store.db() as db:
@@ -153,6 +154,9 @@ def test_plain_text_and_markdown_do_not_authorize_filename_search(store, link):
     (source / "referring.md").write_text(link, encoding="utf-8")
     with pytest.raises(ValueError, match="explicitly linked"):
         read_attachment(store, "_Attachments/report.html", "referring.md", "source")
+    if "(" not in link:  # A Markdown link names the root path report.html itself.
+        with pytest.raises(ValueError, match="explicitly linked"):
+            read_attachment(store, "report.html", "referring.md", "source")
 
 
 def test_excluded_duplicates_are_not_candidates(store):
@@ -194,6 +198,9 @@ def test_filename_link_uses_remote_manifest_before_download(store, tmp_path, mon
             read_attachment(store, path, "referring.md", "source")
         assert not (store.settings.data_dir / "attachment-requests").exists()
     else:
+        pending = read_attachment(store, "report.html", "referring.md", "source")
+        assert pending["pending"] and pending["path"] == path
         assert read_attachment(store, path, "referring.md", "source")["pending"]
         sync.attachment(path)
-        assert read_attachment(store, path, "referring.md", "source")["content"] == "remote report"
+        result = read_attachment(store, "report.html", "referring.md", "source")
+        assert (result["path"], result["content"]) == (path, "remote report")
