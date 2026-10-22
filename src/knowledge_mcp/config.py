@@ -4,6 +4,7 @@ import json
 import os
 import re
 import tomllib
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
@@ -19,6 +20,11 @@ def relative_path(value: str) -> str:
     if PurePosixPath(value).is_absolute():
         raise ValueError("Absolute path is forbidden")
     return value
+
+
+def fold(path: str) -> str:
+    """Compare paths as Obsidian on Windows/macOS sees them: case- and normalization-insensitive."""
+    return unicodedata.normalize("NFC", path).casefold()
 
 
 def glob_regex(pattern: str) -> re.Pattern:
@@ -55,6 +61,7 @@ class Settings:
     semantic: dict = field(default_factory=dict)
     source_sync: dict = field(default_factory=dict)
     git: dict = field(default_factory=dict)
+    drafts: dict = field(default_factory=dict)
 
     @classmethod
     def load(cls, file: str | Path) -> Settings:
@@ -84,6 +91,9 @@ class Settings:
     def policy(self) -> VaultPolicy:
         return VaultPolicy(self)
 
+    def drafts_dir(self) -> str:
+        return relative_path(self.drafts.get("dir", "AI_Drafts"))
+
 
 class VaultPolicy:
     def __init__(self, settings: Settings):
@@ -101,6 +111,8 @@ class VaultPolicy:
         if not isinstance(raw.get("exclude"), list) or any(not isinstance(x, str) for x in raw["exclude"]):
             raise ValueError("exclude must be a list of globs")
         self.patterns = [glob_regex(x) for x in raw["exclude"]]
+        # AI drafts are never source evidence, whatever wiki.config.json excludes.
+        self.drafts = fold(settings.drafts_dir())
         self.snapshot_dir = settings.snapshot_dir
         if settings.snapshot_dir:
             current = settings.snapshot_dir / "current.json"
@@ -122,6 +134,8 @@ class VaultPolicy:
         if vault not in ("wiki", "source"):
             return False
         if vault == "source":
+            if fold(path) == self.drafts or fold(path).startswith(self.drafts + "/"):
+                return False
             parts = path.split("/")
             for n in range(1, len(parts) + 1):
                 prefix = "/".join(parts[:n])

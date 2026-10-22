@@ -196,3 +196,23 @@ def test_refresh_index_records_time_and_clears_on_success(store, monkeypatch):
 
     refresh_index(store)
     assert store.state("index_error") is None
+
+
+@pytest.fixture
+def drafts_enabled(store):
+    store.settings.drafts = {"enabled": True, "remote": "drafts:bucket/vault"}
+
+
+async def test_mcp_save_draft_queues_upload(drafts_enabled, endpoint, store):
+    url, token = endpoint
+    async with httpx.AsyncClient(headers={"Authorization": "Bearer " + token}) as http:
+        async with streamable_http_client(url, http_client=http) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                assert len((await session.list_tools()).tools) == 10
+                draft = {"request_id": "draft_http_1", "path": "초안", "body": "# 초안", "reason": "검토용"}
+                result = await session.call_tool("save_draft", {"request": draft})
+                assert not result.isError, result
+                assert result.structuredContent["path"] == "AI_Drafts/초안.md"
+                status = await session.call_tool("get_status")
+                assert status.structuredContent["pending_drafts"] == 1

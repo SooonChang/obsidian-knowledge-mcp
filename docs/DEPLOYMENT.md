@@ -71,6 +71,47 @@ PC의 아직 업로드하지 않은 내용은 접근할 수 없습니다. 플러
 rclone crypt 포맷은 filename_encoding=base64 호환 설정이 필요합니다.
 OpenSSL 포맷을 rclone crypt로 오인하거나 자동 변환하지 않습니다.
 
+## AI_Drafts 초안 업로드 (선택)
+
+`save_draft` 도구는 원문 S3의 `AI_Drafts/` 아래에만 새 Markdown 파일을 만듭니다.
+Remotely Save가 다음 동기화 때 PC vault로 내려받으므로 사용자는 Obsidian에서 초안을 검토·이동합니다.
+
+원문 조회용 키를 재사용하지 않고 쓰기 범위를 제한한 키를 따로 발급합니다. AWS 정책 예시:
+
+    {"Version": "2012-10-17", "Statement": [
+      {"Effect": "Allow", "Action": ["s3:PutObject", "s3:GetObject"],
+       "Resource": "arn:aws:s3:::BUCKET/PREFIX/AI_Drafts/*"},
+      {"Effect": "Allow", "Action": "s3:ListBucket", "Resource": "arn:aws:s3:::BUCKET",
+       "Condition": {"StringLike": {"s3:prefix": "PREFIX/AI_Drafts/*"}}}
+    ]}
+
+DeleteObject와 다른 prefix 권한은 주지 않습니다. `secrets/rclone.conf`에 별도 remote를 추가합니다.
+
+    [drafts]
+    type = s3
+    provider = Other
+    endpoint = https://YOUR-S3-ENDPOINT
+    region = YOUR-REGION
+    access_key_id = YOUR-DRAFTS-KEY
+    secret_access_key = YOUR-DRAFTS-SECRET
+
+config.toml:
+
+    [drafts]
+    enabled = true
+    remote = "drafts:BUCKET/PREFIX"
+    dir = "AI_Drafts"
+
+`drafts.remote`가 `source_sync.remote`와 같은 rclone remote 이름이면 거부합니다.
+MCP 서버는 요청을 `DATA_DIR/draft-uploads`에 기록하고, sync worker의 별도 스레드가 2초 간격으로 업로드합니다.
+5분 주기의 원문·이미지·Git 동기화가 진행 중이어도 기다리지 않습니다. 결과는 7일간 보관합니다.
+업로드 직전 원격 목록을 확인해 대소문자·한글 정규화(NFC/NFD)를 무시하고 같은 이름이 있으면 거부합니다.
+S3에는 원자적 "없을 때만 생성"이 없으므로 확인과 업로드 사이에 PC에서 같은 이름을 올리면 `upload_unverified`로 보고합니다.
+대기 중 요청은 20개로 제한합니다. 실패한 요청은 새 request_id로 다시 보냅니다.
+`AI_Drafts/`는 `wiki.config.json`의 exclude와 관계없이 원문 검색·receipt 대상에서 제외합니다.
+사용자가 노트를 `AI_Drafts/` 밖으로 옮기면 다음 동기화부터 원문으로 취급합니다.
+초안은 평문으로 올리므로 Remotely Save 암호화를 사용하는 vault에서는 활성화하지 않습니다.
+
 ## Git 서버 브랜치 준비와 시작
 
 UID/GID는 `.env`의 APP_UID/APP_GID와 Compose의 `user`에서만 지정합니다.

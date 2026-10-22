@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -15,7 +16,9 @@ from .storage import Store, atomic_write, digest, now
 
 
 class CommandFailure(RuntimeError):
-    pass
+    def __init__(self, message: str, returncode: int | None = None):
+        super().__init__(message)
+        self.returncode = returncode
 
 
 class SyncValidationError(ValueError):
@@ -30,8 +33,26 @@ def run(args, *, cwd=None, timeout=300):
     result = subprocess.run(args, cwd=cwd, capture_output=True, timeout=timeout, check=False)
     if result.returncode:
         # Never expose rclone errors, remote URLs or credentials in tool outputs.
-        raise CommandFailure(f"{Path(args[0]).name} failed (exit {result.returncode})")
+        raise CommandFailure(f"{Path(args[0]).name} failed (exit {result.returncode})", result.returncode)
     return result.stdout.decode("utf-8", errors="replace").strip()
+
+
+def rclone(*args):
+    cfg = os.environ.get("RCLONE_CONFIG")
+    command = ["rclone"]
+    if cfg:
+        command += ["--config", cfg]
+    return run(command + list(args))
+
+
+def named_remote(remote) -> bool:
+    """A configured rclone remote, never a local filesystem path or ad-hoc backend."""
+    return (
+        isinstance(remote, str)
+        and ":" in remote
+        and not remote.startswith(("/", ":", "-"))
+        and "\\" not in remote
+    )
 
 
 class SourceSync:
@@ -40,22 +61,11 @@ class SourceSync:
         self.root = self.settings.snapshot_dir
         self.remote = self.settings.source_sync.get("remote", "")
         self.lock = FileLock(str(self.settings.data_dir / "source-sync.lock"), timeout=30)
-        # Require a configured rclone remote, never a local filesystem source or ad-hoc backend.
-        if self.settings.source_sync.get("enabled") and (
-            not self.root
-            or not self.remote
-            or self.remote.startswith(("/", ":", "-"))
-            or ":" not in self.remote
-            or "\\" in self.remote
-        ):
+        if self.settings.source_sync.get("enabled") and (not self.root or not named_remote(self.remote)):
             raise ValueError("source_sync requires snapshot_dir and a named rclone remote")
 
     def command(self, *args):
-        cfg = os.environ.get("RCLONE_CONFIG")
-        command = ["rclone"]
-        if cfg:
-            command += ["--config", cfg]
-        return run(command + list(args))
+        return rclone(*args)
 
     def listing(self):
         records = json.loads(self.command("lsjson", self.remote, "--recursive", "--files-only"))
@@ -415,11 +425,27 @@ class GitSync:
                 ) from None
 
 
+def drafts(store: Store, forever=False):
+    from .drafts import DraftUpload
+
+    while True:
+        try:
+            DraftUpload(store).process()
+        except Exception as exc:
+            store.state("drafts", {"ok": False, "error": type(exc).__name__, "at": now()})
+        if not forever:
+            return
+        time.sleep(2)
+
+
 def worker(settings: Settings, *, once=False):
     store = Store(settings)
     from .knowledge import Knowledge
 
     Knowledge(store).recover()
+    if not once:
+        # Drafts must not wait for a full source/image/Git cycle, which can take minutes.
+        threading.Thread(target=drafts, args=(store, True), daemon=True).start()
     next_sync = 0
     while True:
         jobs = []
@@ -461,5 +487,6 @@ def worker(settings: Settings, *, once=False):
             except Exception as exc:
                 store.state("attachment_error", {"error": type(exc).__name__, "at": now()})
         if once:
+            drafts(store)
             return
         time.sleep(2)

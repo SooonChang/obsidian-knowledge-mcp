@@ -11,6 +11,12 @@ allowed_origins = []
 enabled = true
 remote = "notes:bucket-name/vault-prefix"
 
+[drafts]
+# Upload new Markdown drafts to AI_Drafts/ in the source vault. Requires a separate write-scoped remote.
+enabled = false
+remote = "drafts:bucket-name/vault-prefix"
+dir = "AI_Drafts"
+
 [git]
 enabled = true
 branch = "codex/wiki-memory"
