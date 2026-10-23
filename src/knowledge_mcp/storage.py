@@ -104,6 +104,10 @@ class Store:
                 CREATE TABLE IF NOT EXISTS states (key TEXT PRIMARY KEY, value TEXT);
                 CREATE TABLE IF NOT EXISTS vectors (
                   id TEXT, model TEXT, chunk_hash TEXT, vector BLOB, PRIMARY KEY(id,model));
+                CREATE TABLE IF NOT EXISTS searches (
+                  at TEXT, requested TEXT, scope TEXT, mode TEXT, semantic TEXT, error TEXT,
+                  ms REAL, results INTEGER, keyword_only INTEGER, semantic_only INTEGER, both INTEGER);
+                CREATE INDEX IF NOT EXISTS searches_at ON searches(at);
             """)
 
     @contextmanager
@@ -125,6 +129,68 @@ class Store:
                 return value
             row = db.execute("SELECT value FROM states WHERE key=?", (key,)).fetchone()
             return json.loads(row[0]) if row else None
+
+    def record_search(self, requested, scope, result, ms):
+        # Query text is not stored; usage is measured by outcome only.
+        matched = result.get("matched", {})
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+        with self.db() as db:
+            db.execute("DELETE FROM searches WHERE at < ?", (cutoff,))
+            db.execute(
+                "INSERT INTO searches VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    now(),
+                    requested,
+                    scope,
+                    result["mode"],
+                    result["semantic"],
+                    result.get("semantic_error"),
+                    ms,
+                    len(result["results"]),
+                    matched.get("keyword", 0),
+                    matched.get("semantic", 0),
+                    matched.get("both", 0),
+                ),
+            )
+
+    def search_usage(self, days=7):
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        with self.db() as db:
+            total = db.execute(
+                """SELECT COUNT(*), AVG(ms), SUM(results), SUM(keyword_only), SUM(semantic_only),
+                   SUM(both), MAX(at) FROM searches WHERE at >= ?""",
+                (cutoff,),
+            ).fetchone()
+            semantic = db.execute(
+                "SELECT semantic, COUNT(*) FROM searches WHERE at >= ? GROUP BY semantic", (cutoff,)
+            ).fetchall()
+            errors = db.execute(
+                """SELECT error, COUNT(*) FROM searches WHERE at >= ? AND error IS NOT NULL
+                   GROUP BY error""",
+                (cutoff,),
+            ).fetchall()
+            p95 = db.execute(
+                "SELECT ms FROM searches WHERE at >= ? ORDER BY ms DESC LIMIT 1 OFFSET ?",
+                (cutoff, int((total[0] or 0) * 0.05)),
+            ).fetchone()
+        count, avg_ms, results, keyword_only, semantic_only, both, last = total
+        return {
+            "days": days,
+            "searches": count,
+            "last_at": last,
+            # ready: hybrid ranking used; indexing/unavailable/disabled fell back to keyword.
+            "semantic": {k: v for k, v in semantic},
+            "semantic_errors": {k: v for k, v in errors},
+            "avg_ms": round(avg_ms, 1) if avg_ms is not None else None,
+            "p95_ms": round(p95[0], 1) if p95 else None,
+            # Origin of returned hits: semantic_only is what keyword search alone would have missed.
+            "results": {
+                "total": results or 0,
+                "keyword_only": keyword_only or 0,
+                "semantic_only": semantic_only or 0,
+                "both": both or 0,
+            },
+        }
 
     def clear_state(self, key: str):
         with self.db() as db:

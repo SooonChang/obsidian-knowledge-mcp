@@ -165,14 +165,28 @@ def hybrid_search(store: Store, query, scope="auto", limit=10, mode="auto"):
         results = [x[1] for x in sorted(merged.values(), key=lambda x: x[0], reverse=True)]
         if scope == "auto":
             results.sort(key=lambda x: x["vault"] != "wiki")
+        results = results[:limit]
+        from_keyword = {(h["vault"], h["path"]) for h in lexical}
+        from_semantic = {(h["vault"], h["path"]) for h in semantic}
+        keys = [(h["vault"], h["path"]) for h in results]
         return {
             "mode": "hybrid" if semantic else "keyword",
             "semantic": "ready" if semantic else "indexing",
-            "results": results[:limit],
+            "results": results,
+            "matched": {
+                "keyword": sum(k in from_keyword and k not in from_semantic for k in keys),
+                "semantic": sum(k in from_semantic and k not in from_keyword for k in keys),
+                "both": sum(k in from_keyword and k in from_semantic for k in keys),
+            },
             "embedding": store.state("semantic"),
         }
-    except (httpx.HTTPError, ValueError, OSError, KeyError):
-        return {"mode": "keyword", "semantic": "unavailable", "results": lexical[:limit]}
+    except (httpx.HTTPError, ValueError, OSError, KeyError) as exc:
+        return {
+            "mode": "keyword",
+            "semantic": "unavailable",
+            "semantic_error": type(exc).__name__,
+            "results": lexical[:limit],
+        }
 
 
 def export_vectors(store: Store, file: Path):

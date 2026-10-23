@@ -46,6 +46,7 @@ def main():
         result = store.reindex()
     elif args.command == "status":
         result = {k: store.state(k) for k in ("index", "source_sync", "image_sync", "git", "semantic", "drafts")}
+        result["search_usage"] = {d: store.search_usage(d) for d in (1, 7, 30)}
     elif args.command == "lint":
         from .knowledge import Knowledge
 

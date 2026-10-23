@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import hmac
 import json
+import sqlite3
+import time
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -130,7 +132,17 @@ def create_app(settings: Settings):
         """Search notes. scope: auto/wiki/source/both; mode: auto/keyword/hybrid. Read hits for evidence."""
         if not query.strip() or len(query) > 1000 or not 1 <= limit <= 50:
             raise ValueError("query must be 1..1000 characters; limit must be 1..50")
-        return await asyncio.to_thread(hybrid_search, store, query, scope, limit, mode)
+
+        def search():
+            started = time.perf_counter()
+            result = hybrid_search(store, query, scope, limit, mode)
+            try:
+                store.record_search(mode, scope, result, (time.perf_counter() - started) * 1000)
+            except sqlite3.Error:
+                pass  # Usage metrics must never fail a search.
+            return result
+
+        return await asyncio.to_thread(search)
 
     @mcp.tool(annotations=readonly)
     async def read_note(
@@ -222,7 +234,7 @@ def create_app(settings: Settings):
 
     @mcp.tool(annotations=readonly)
     async def get_status() -> dict[str, Any]:
-        """Report source/index/Git/embedding state and pending attachment downloads."""
+        """Report source/index/Git/embedding state, 7-day search usage and pending attachment downloads."""
 
         def status():
             pending = settings.data_dir / "attachment-requests"
@@ -233,6 +245,7 @@ def create_app(settings: Settings):
                 },
                 "pending_drafts": drafts.pending(),
                 "semantic_enabled": bool(settings.semantic.get("enabled")),
+                "search_usage": store.search_usage(),
                 "pending_attachments": len(list(pending.glob("*.json"))) if pending.exists() else 0,
                 "limitations": "Server sees uploaded S3 content; source_checked is distinct from sync time.",
             }

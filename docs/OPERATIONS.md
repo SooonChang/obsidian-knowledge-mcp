@@ -18,6 +18,15 @@ get_status도 같은 운영 상태를 제공합니다.
 오류가 발생하면 게시·삭제를 보류합니다. 원본 파일을 확인하거나 `exclude`로 제외한 뒤 다음 동기화를 기다립니다.
 원문 동기화 실패와 원문 부재, Git push 대기, 의미 검색 미준비를 구분합니다.
 worker 로그는 비밀 노출을 피하기 위해 오류 종류만 출력합니다.
+
+### 검색 사용량
+
+`search_notes` 호출마다 결과 방식만 `searches` 테이블에 기록하고 질의 원문은 저장하지 않습니다.
+기록은 90일 뒤 삭제되며 CLI `benchmark` 검색은 집계하지 않습니다.
+get_status의 `search_usage`는 최근 7일, CLI `status`는 1·7·30일 집계를 보여줍니다.
+`semantic`은 응답 상태별 건수입니다. `ready`만 hybrid 순위가 적용되었고 `indexing`·`unavailable`·`disabled`는 keyword로 대체되었습니다.
+`unavailable`의 원인은 `semantic_errors`에 오류 종류로 집계됩니다.
+`results.semantic_only`는 keyword 검색만으로는 반환되지 않았을 결과 수로, 의미 검색의 실제 기여를 나타냅니다.
 운영자가 진단할 때는 read-only rclone lsjson과 git status/fetch 등을 별도 실행하되 출력 공유에 주의합니다.
 
 ## 저장 장애와 동시 작업

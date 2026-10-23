@@ -293,12 +293,55 @@ def test_html_link_and_script_removal(store):
         read_attachment(store, "other.html", "실험.md", "source")
 
 
-def test_semantic_failure_keeps_keyword(store):
+def test_semantic_failure_keeps_keyword(store, monkeypatch):
     store.reindex()
+    monkeypatch.setattr(store.settings, "token", lambda: "t")
     store.settings.semantic = {"enabled": True, "url": "http://127.0.0.1:1", "timeout_seconds": 0.05}
     result = hybrid_search(store, "프리퀀시")
     assert result["mode"] == "keyword"
+    assert result["semantic_error"] == "ConnectError"
     assert result["results"]
+
+
+def test_hybrid_reports_hit_origin_and_usage(store, monkeypatch):
+    import httpx
+    import numpy as np
+
+    from knowledge_mcp import semantic
+
+    store.reindex()
+    store.settings.semantic = {"enabled": True}
+    monkeypatch.setattr(store.settings, "token", lambda: "t")
+    query = np.asarray([1, 0, 0, 0], dtype=np.float32)
+    with store.db() as db:
+        for row in db.execute("SELECT id, hash, path FROM chunks").fetchall():
+            # Only the operations note is semantically close; keyword finds the source note.
+            vector = query if row["path"].endswith("wiki-operations.md") else np.asarray([0, 1, 0, 0])
+            db.execute(
+                "INSERT INTO vectors VALUES (?,?,?,?)",
+                (row["id"], "m", row["hash"], np.asarray(vector, dtype=np.float32).tobytes()),
+            )
+    response = httpx.Response(
+        200, json={"vector": query.tolist(), "model": "m"}, request=httpx.Request("POST", "http://x")
+    )
+    monkeypatch.setattr(semantic.httpx, "post", lambda *a, **k: response)
+    result = hybrid_search(store, "프리퀀시", "both", 5)
+    assert result["mode"] == "hybrid"
+    assert result["matched"]["semantic"] >= 1 and result["matched"]["both"] == 1
+    store.record_search("auto", "both", result, 12.5)
+    store.record_search(
+        "auto",
+        "auto",
+        {"mode": "keyword", "semantic": "unavailable", "semantic_error": "ConnectError", "results": []},
+        3.0,
+    )
+    usage = store.search_usage()
+    assert usage["searches"] == 2
+    assert usage["semantic"] == {"ready": 1, "unavailable": 1}
+    assert usage["semantic_errors"] == {"ConnectError": 1}
+    assert usage["results"]["semantic_only"] == result["matched"]["semantic"]
+    with store.db() as db:
+        assert "프리퀀시" not in json.dumps([list(r) for r in db.execute("SELECT * FROM searches")])
 
 
 def test_reindex_missing_source_preserves_wiki(store):
