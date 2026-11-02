@@ -184,7 +184,8 @@ def test_filename_link_uses_remote_manifest_before_download(store, tmp_path, mon
         remote["other/report.html"] = b"<p>different report</p>"
     metadata = {path: {"size": len(data), "mtime": "unchanged"} for path, data in remote.items()}
 
-    monkeypatch.setattr(SourceSync, "listing", lambda self: metadata)
+    monkeypatch.setattr(SourceSync, "listing", lambda self, fresh=False: metadata)
+    monkeypatch.setattr(SourceSync, "entry", lambda self, path: metadata.get(path))
 
     def download(self, path, dest, expected):
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -213,7 +214,8 @@ def test_listed_attachment_source_stays_available_before_download(store, tmp_pat
     store.settings.source_sync = {"enabled": True, "remote": "notes:bucket/vault"}
     remote = {"referring.md": b"[[report.html]]", "_Attachments/report.html": b"<p>report</p>"}
     metadata = {path: {"size": len(data), "mtime": "unchanged"} for path, data in remote.items()}
-    monkeypatch.setattr(SourceSync, "listing", lambda self: metadata)
+    monkeypatch.setattr(SourceSync, "listing", lambda self, fresh=False: metadata)
+    monkeypatch.setattr(SourceSync, "entry", lambda self, path: metadata.get(path))
     monkeypatch.setattr(
         SourceSync, "download", lambda self, path, dest, expected: dest.write_bytes(remote[path])
     )

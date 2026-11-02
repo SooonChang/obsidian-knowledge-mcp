@@ -21,6 +21,7 @@ from .images import read_image as image
 from .knowledge import Knowledge, SaveRequest, find_note
 from .semantic import hybrid_search
 from .storage import Store, now
+from .sync import request_sync
 
 INSTRUCTIONS = """업무 맥락이 필요한 질문에서는 get_context와 search_notes로 위키를 먼저 확인한다.
 정확한 수치·현재 상태·근거가 필요하면 get_sources와 read_note로 원문을 읽는다.
@@ -108,6 +109,7 @@ def create_app(settings: Settings):
     @mcp.tool(annotations=readonly)
     async def get_context() -> dict[str, Any]:
         """Read the document map and authoritative workflow rules before knowledge work."""
+        request_sync(settings)
 
         def read():
             files = [
@@ -130,6 +132,7 @@ def create_app(settings: Settings):
         query: str, scope: str = "auto", limit: int = 10, mode: str = "auto"
     ) -> dict[str, Any]:
         """Search notes. scope: auto/wiki/source/both; mode: auto/keyword/hybrid. Read hits for evidence."""
+        request_sync(settings)
         if not query.strip() or len(query) > 1000 or not 1 <= limit <= 50:
             raise ValueError("query must be 1..1000 characters; limit must be 1..50")
 
@@ -152,6 +155,7 @@ def create_app(settings: Settings):
         path may omit .md, as in a wikilink target. A bare filename such as [[note]] resolves
         to the unique note with that name; the response path is the resolved full path.
         """
+        request_sync(settings)
 
         def read():
             return store.read(vault, find_note(settings.policy(), vault, path), start, end, section)
@@ -161,6 +165,7 @@ def create_app(settings: Settings):
     @mcp.tool(annotations=readonly)
     async def get_sources(wiki_path: str) -> list[dict[str, Any]]:
         """Follow source frontmatter into the read-only source vault; no implicit source verification."""
+        request_sync(settings)
         return await asyncio.to_thread(knowledge.sources, wiki_path)
 
     @mcp.tool(annotations=readonly)
@@ -181,6 +186,7 @@ def create_app(settings: Settings):
         total_characters is the full extracted length; receipts cover only the returned range.
         PDF: use page (up to 4 pages per call); start/max_chars are HTML-only.
         """
+        request_sync(settings)
         return await asyncio.to_thread(
             attachment, store, path, linked_from, linked_vault, page, start, max_chars, expected_hash
         )
@@ -198,6 +204,7 @@ def create_app(settings: Settings):
         Preview: first frame, at most 2048 px per side. No OCR verification.
         Remote images await periodic synchronization if not yet available.
         """
+        request_sync(settings)
         return await asyncio.to_thread(image, store, path, linked_from, linked_vault, expected_hash)
 
     @mcp.tool(
@@ -210,6 +217,7 @@ def create_app(settings: Settings):
         Search existing notes first. Changes are Markdown bodies plus metadata; only wiki/conversation
         classifications can be written. Supply read receipts for newly referenced source files.
         """
+        request_sync(settings)
         return await asyncio.to_thread(knowledge.save, request)
 
     if drafts.enabled():
@@ -230,6 +238,7 @@ def create_app(settings: Settings):
     @mcp.tool(annotations=readonly)
     async def lint() -> dict[str, Any]:
         """Inspect structure and links without editing. Does not establish truth or semantic consistency."""
+        request_sync(settings)
         return await asyncio.to_thread(knowledge.lint)
 
     @mcp.tool(annotations=readonly)

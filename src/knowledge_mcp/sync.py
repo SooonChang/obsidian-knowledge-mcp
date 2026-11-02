@@ -45,6 +45,25 @@ def rclone(*args):
     return run(command + list(args))
 
 
+# S3 bills per request. Without these flags rclone lists folder by folder and
+# sends one HEAD per object to read its stored mtime and Content-Type.
+# --fast-list lists 1,000 keys per request; the server LastModified and size
+# from the listing are enough to detect changes. Avoid --hash: multipart
+# objects would need a HEAD each.
+LIST_FLAGS = ("--files-only", "--fast-list", "--no-mimetype", "--use-server-modtime")
+SYNC_REQUEST = "sync-request"
+
+
+def request_sync(settings: Settings):
+    """Ask the worker for a source refresh; it rate-limits how often S3 is listed."""
+    if not settings.source_sync.get("enabled"):
+        return
+    try:
+        (settings.data_dir / SYNC_REQUEST).touch()
+    except OSError:
+        pass  # A refresh hint must never fail a tool call.
+
+
 def named_remote(remote) -> bool:
     """A configured rclone remote, never a local filesystem path or ad-hoc backend."""
     return (
@@ -56,8 +75,10 @@ def named_remote(remote) -> bool:
 
 
 class SourceSync:
-    def __init__(self, store: Store):
+    def __init__(self, store: Store, cache: dict | None = None):
         self.store, self.settings = store, store.settings
+        # Shared by the jobs of one worker cycle so the remote is listed once.
+        self.cache = cache
         self.root = self.settings.snapshot_dir
         self.remote = self.settings.source_sync.get("remote", "")
         self.lock = FileLock(str(self.settings.data_dir / "source-sync.lock"), timeout=30)
@@ -67,18 +88,45 @@ class SourceSync:
     def command(self, *args):
         return rclone(*args)
 
-    def listing(self):
-        records = json.loads(self.command("lsjson", self.remote, "--recursive", "--files-only"))
+    def remote_files(self, fresh=False):
+        if self.cache is not None and not fresh and "records" in self.cache:
+            return self.cache["records"]
+        records = json.loads(self.command("lsjson", self.remote, "--recursive", *LIST_FLAGS))
+        if self.cache is not None:
+            self.cache["records"] = records
+        return records
+
+    @staticmethod
+    def metadata(record):
+        if record.get("IsLink") or record.get("Size", 0) < 0:
+            return None
+        return {"size": record["Size"], "mtime": record.get("ModTime"), "id": record.get("ID")}
+
+    def listing(self, fresh=False):
         policy, files = self.settings.policy(), {}
-        for record in records:
+        for record in self.remote_files(fresh):
             path = record["Path"]
             if not policy.allowed("source", path):
                 continue
-            if record.get("IsLink") or record.get("Size", 0) < 0:
-                continue
-            if self.accept_file(policy, path):
-                files[path] = {"size": record["Size"], "mtime": record.get("ModTime"), "id": record.get("ID")}
+            metadata = self.metadata(record)
+            if metadata and self.accept_file(policy, path):
+                files[path] = metadata
         return files
+
+    def entry(self, path):
+        """Metadata of one object, listing only its folder instead of the whole vault."""
+        parent, _, name = relative_path(path).rpartition("/")
+        root = self.remote.rstrip("/") + ("/" + parent if parent else "")
+        try:
+            records = json.loads(self.command("lsjson", root, *LIST_FLAGS))
+        except CommandFailure as exc:
+            if exc.returncode == 3:  # Directory not found.
+                return None
+            raise
+        for record in records:
+            if record["Path"] == name:
+                return self.metadata(record)
+        return None
 
     def accept_file(self, policy, path):
         return path.lower().endswith((".md", ".html", ".htm", ".pdf"))
@@ -89,6 +137,8 @@ class SourceSync:
         if expected["size"] > limit:
             raise SyncValidationError("file_too_large", "Remote document exceeds configured size limit")
         dest.parent.mkdir(parents=True, exist_ok=True)
+        # Do not add --s3-no-head-object: copyto then cannot tell the source is a
+        # file and silently copies nothing. Downloads are rare; listings are not.
         self.command("copyto", self.remote.rstrip("/") + "/" + path, str(dest), "--retries", "2")
         if dest.is_symlink() or dest.stat().st_size != expected["size"]:
             raise SyncValidationError("download_size_mismatch", "Downloaded size differs from remote listing")
@@ -110,6 +160,7 @@ class SourceSync:
             dest = self.root / "generations" / generation
             dest.mkdir(parents=True)
             manifest = {"generation": generation, "at": now(), "files": before, "hashes": {}}
+            downloaded = False
             for path, metadata in before.items():
                 markdown = path.lower().endswith(".md") and not (
                     path == policy.attachments or path.startswith(policy.attachments + "/")
@@ -133,11 +184,13 @@ class SourceSync:
                         continue
                 elif markdown:
                     self.download(path, target, metadata)
+                    downloaded = True
                 else:
                     continue
                 manifest["hashes"][path] = digest(target.read_bytes())
-            after = self.listing()
-            if before != after:
+            # Only newly downloaded bytes can be torn by a concurrent upload; a
+            # generation of unchanged files needs no second (billed) listing.
+            if downloaded and self.listing(fresh=True) != before:
                 raise ValueError("Remote changed during sync; previous generation retained")
             # A stable object listing is not a transaction across an Obsidian upload.
             with self.store.lock:
@@ -178,11 +231,11 @@ class SourceSync:
             if file.exists():
                 return file
             # Verify the remote entry again, including after download.
-            if self.listing().get(path) != metadata:
+            if self.entry(path) != metadata:
                 raise ValueError("Attachment changed; synchronize source first")
             temp = file.with_name(file.name + "." + uuid.uuid4().hex + ".download")
             self.download(path, temp, metadata)
-            if self.listing().get(path) != metadata:
+            if self.entry(path) != metadata:
                 temp.unlink(missing_ok=True)
                 raise ValueError("Attachment changed during download")
             os.replace(temp, file)
@@ -270,7 +323,7 @@ class ImageSync(SourceSync):
                     self.store.state("image_sync", progress)
                 progress.update(stage="verifying")
                 self.store.state("image_sync", progress)
-                if self.listing() != before:
+                if downloads and self.listing(fresh=True) != before:
                     raise SyncValidationError("remote_changed", "Remote images changed during sync; publication deferred")
                 progress.update(stage="publishing")
                 self.store.state("image_sync", progress)
@@ -438,6 +491,40 @@ def drafts(store: Store, forever=False):
         time.sleep(2)
 
 
+def seconds(section: dict, key: str, default: int) -> int:
+    return max(60, int(section.get(key, default)))
+
+
+class Schedule:
+    """Decide when to list S3 (billed per request) and when to sync Git (free).
+
+    Source and images sync every interval_seconds, and sooner when an MCP call
+    requested it, but never more often than on_demand_min_seconds.
+    """
+
+    def __init__(self, settings: Settings):
+        self.request = settings.data_dir / SYNC_REQUEST
+        self.interval = seconds(settings.source_sync, "interval_seconds", 1800)
+        self.min_gap = seconds(settings.source_sync, "on_demand_min_seconds", 300)
+        self.git_interval = seconds(settings.git, "interval_seconds", 300)
+        self.last_source = self.last_git = None
+
+    def due(self, clock: float):
+        source = (
+            self.last_source is None
+            or clock - self.last_source >= self.interval
+            or (self.request.exists() and clock - self.last_source >= self.min_gap)
+        )
+        git = source or self.last_git is None or clock - self.last_git >= self.git_interval
+        if source:
+            # Calls arriving during this cycle request the next one.
+            self.request.unlink(missing_ok=True)
+            self.last_source = clock
+        if git:
+            self.last_git = clock
+        return source, git
+
+
 def worker(settings: Settings, *, once=False):
     store = Store(settings)
     from .knowledge import Knowledge
@@ -446,16 +533,18 @@ def worker(settings: Settings, *, once=False):
     if not once:
         # Drafts must not wait for a full source/image/Git cycle, which can take minutes.
         threading.Thread(target=drafts, args=(store, True), daemon=True).start()
-    next_sync = 0
+    schedule = Schedule(settings)
     while True:
+        source, git = schedule.due(time.monotonic())
         jobs = []
-        if time.monotonic() >= next_sync:
-            jobs = [
-                ("source_sync", SourceSync(store).once),
-                ("image_sync", ImageSync(store).once),
-                ("git", GitSync(store).once),
+        if source:
+            cache = {}
+            jobs += [
+                ("source_sync", lambda: SourceSync(store, cache).once()),
+                ("image_sync", lambda: ImageSync(store, cache).once()),
             ]
-            next_sync = time.monotonic() + 300
+        if git:
+            jobs.append(("git", lambda: GitSync(store).once()))
         for key, job in jobs:
             try:
                 job()

@@ -10,6 +10,9 @@ allowed_origins = []
 [source_sync]
 enabled = true
 remote = "notes:bucket-name/vault-prefix"
+# S3 bills per list request. Sync every 30 minutes, and on MCP use at most every 5 minutes.
+interval_seconds = 1800
+on_demand_min_seconds = 300
 
 [drafts]
 # Upload new Markdown drafts to AI_Drafts/ in the source vault. Requires a separate write-scoped remote.
@@ -20,6 +23,7 @@ dir = "AI_Drafts"
 [git]
 enabled = true
 branch = "codex/wiki-memory"
+interval_seconds = 300 # Git fetch/push; no S3 requests.
 
 [semantic]
 enabled = false

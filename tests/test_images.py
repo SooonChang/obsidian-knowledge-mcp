@@ -88,7 +88,7 @@ def test_failed_or_unstable_image_sync_retains_published_mirror(store, image_rem
     listing = sync.listing
     calls = 0
 
-    def unstable():
+    def unstable(fresh=False):
         nonlocal calls
         calls += 1
         return listing() if calls == 1 else {}
@@ -257,7 +257,7 @@ def test_worker_records_image_failure_independently(store, image_remote, monkeyp
 def test_sync_rejects_oversized_image_before_downloading(store, image_remote, monkeypatch):
     sync = ImageSync(store)
     path = "_Attachments/huge.png"
-    monkeypatch.setattr(sync, "listing", lambda: {path: {"size": 25_000_001}})
+    monkeypatch.setattr(sync, "listing", lambda fresh=False: {path: {"size": 25_000_001}})
     with pytest.raises(ValueError, match="size limit"):
         sync.once()
     assert not image_remote[1]

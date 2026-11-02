@@ -28,6 +28,8 @@ get_status의 `search_usage`는 최근 7일, CLI `status`는 1·7·30일 집계�
 `unavailable`의 원인은 `semantic_errors`에 오류 종류로 집계됩니다.
 `results.semantic_only`는 keyword 검색만으로는 반환되지 않았을 결과 수로, 의미 검색의 실제 기여를 나타냅니다.
 운영자가 진단할 때는 read-only rclone lsjson과 git status/fetch 등을 별도 실행하되 출력 공유에 주의합니다.
+수동 lsjson에도 `--fast-list --no-mimetype --use-server-modtime`을 붙입니다. 빠뜨리면 객체마다 HEAD 요청이 발생해 S3 요청 비용이 늘어납니다.
+S3 비용이 늘면 AWS Cost Explorer에서 S3 사용 유형 `Requests-Tier1`(LIST)·`Requests-Tier2`(GET/HEAD)를 확인합니다.
 
 ## 저장 장애와 동시 작업
 

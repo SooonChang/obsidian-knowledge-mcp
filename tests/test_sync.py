@@ -7,7 +7,7 @@ from filelock import FileLock
 
 from knowledge_mcp.knowledge import Knowledge, SaveRequest
 from knowledge_mcp.storage import Store, digest
-from knowledge_mcp.sync import GitSync, SourceSync
+from knowledge_mcp.sync import GitSync, ImageSync, Schedule, SourceSync, request_sync
 
 
 def test_source_snapshots_and_delete(store, tmp_path, monkeypatch):
@@ -28,6 +28,8 @@ def test_source_snapshots_and_delete(store, tmp_path, monkeypatch):
             pass
         calls.append(args[0])
         if args[0] == "lsjson":
+            # Cheap listing only: no per-object HEAD for mtime or MIME type.
+            assert {"--fast-list", "--no-mimetype", "--use-server-modtime"} <= set(args)
             return json.dumps([{"Path": k, "Size": len(v), "ModTime": digest(v)} for k, v in remote.items()])
         assert args[0] == "copyto"
         assert args[1].startswith("notes:bucket/vault/")
@@ -76,11 +78,110 @@ def test_unstable_remote_does_not_publish(store, tmp_path, monkeypatch):
     store.settings.snapshot_dir = tmp_path / "snapshots"
     store.settings.source_sync = {"enabled": True, "remote": "notes:bucket/vault"}
     sync = SourceSync(store)
-    listed = iter([{}, {"new.md": {"size": 0, "mtime": "later"}}])
-    monkeypatch.setattr(sync, "listing", lambda: next(listed))
+    first = {"a.md": {"size": 1, "mtime": "now", "id": None}}
+    listed = iter([first, first | {"new.md": {"size": 0, "mtime": "later", "id": None}}])
+    monkeypatch.setattr(sync, "listing", lambda fresh=False: next(listed))
+    monkeypatch.setattr(sync, "download", lambda path, dest, expected: dest.write_bytes(b"#"))
     with pytest.raises(ValueError, match="changed during"):
         sync.once()
     assert not (store.settings.snapshot_dir / "current.json").exists()
+
+
+def fake_remote(monkeypatch, remote):
+    calls = []
+
+    def fake_command(self, *args):
+        calls.append(args)
+        if args[0] == "lsjson":
+            return json.dumps([{"Path": k, "Size": len(v), "ModTime": digest(v)} for k, v in remote.items()])
+        from pathlib import Path
+
+        Path(args[2]).parent.mkdir(parents=True, exist_ok=True)
+        Path(args[2]).write_bytes(remote[args[1].split("/", 2)[2]])
+        return ""
+
+    monkeypatch.setattr(SourceSync, "command", fake_command)
+    return calls
+
+
+def test_unchanged_cycle_lists_once_and_downloads_nothing(store, tmp_path, monkeypatch):
+    store.settings.snapshot_dir = tmp_path / "snapshots"
+    store.settings.source_sync = {"enabled": True, "remote": "notes:bucket/vault"}
+    remote = {"a.md": b"# a", "b.md": b"# b"}
+    calls = fake_remote(monkeypatch, remote)
+    SourceSync(store).once()
+    # Downloads were verified by a second listing.
+    assert [c[0] for c in calls] == ["lsjson", "copyto", "copyto", "lsjson"]
+    calls.clear()
+    SourceSync(store).once()
+    assert [c[0] for c in calls] == ["lsjson"]
+    calls.clear()
+    remote["a.md"] = b"# changed"
+    SourceSync(store).once()
+    assert [c[0] for c in calls] == ["lsjson", "copyto", "lsjson"]
+    assert store.keyword("changed", "source")
+
+
+def test_cycle_shares_one_listing_between_source_and_images(store, tmp_path, monkeypatch):
+    store.settings.snapshot_dir = tmp_path / "snapshots"
+    store.settings.source_sync = {"enabled": True, "remote": "notes:bucket/vault"}
+    calls = fake_remote(monkeypatch, {"a.md": b"# a"})
+    SourceSync(store).once()
+    calls.clear()
+    cache = {}
+    SourceSync(store, cache).once()
+    ImageSync(store, cache).once()
+    assert [c[0] for c in calls] == ["lsjson"]
+
+
+def test_attachment_lists_only_its_folder(store, tmp_path, monkeypatch):
+    store.settings.snapshot_dir = tmp_path / "snapshots"
+    store.settings.source_sync = {"enabled": True, "remote": "notes:bucket/vault"}
+    remote = {"docs/report.pdf": b"%PDF"}
+    calls = []
+
+    def fake_command(self, *args):
+        calls.append(args)
+        if args[0] == "lsjson":
+            if "--recursive" in args:
+                return json.dumps([{"Path": k, "Size": len(v), "ModTime": "t"} for k, v in remote.items()])
+            assert args[1] == "notes:bucket/vault/docs"
+            return json.dumps([{"Path": "report.pdf", "Size": 4, "ModTime": "t"}])
+        from pathlib import Path
+
+        Path(args[2]).write_bytes(remote["docs/report.pdf"])
+        return ""
+
+    monkeypatch.setattr(SourceSync, "command", fake_command)
+    sync = SourceSync(store)
+    sync.once()
+    calls.clear()
+    assert sync.attachment("docs/report.pdf").read_bytes() == b"%PDF"
+    assert not [c for c in calls if "--recursive" in c]
+
+
+def test_schedule_periodic_and_rate_limited_on_demand(store):
+    settings = store.settings
+    settings.source_sync = {"enabled": True, "remote": "notes:bucket/vault"}
+    schedule = Schedule(settings)
+    assert schedule.due(0) == (True, True)
+    assert schedule.due(10) == (False, False)
+    request_sync(settings)
+    # Requested too soon after the last sync: wait for the minimum gap.
+    assert schedule.due(299)[0] is False
+    assert schedule.due(300) == (True, True)
+    assert not (settings.data_dir / "sync-request").exists()
+    # Without requests, sources wait for the interval; Git keeps its own.
+    assert schedule.due(600) == (False, True)
+    assert schedule.due(2099)[0] is False
+    assert schedule.due(2100) == (True, True)
+
+
+def test_request_sync_ignored_when_source_disabled(store):
+    settings = store.settings
+    settings.source_sync = {"enabled": False}
+    request_sync(settings)
+    assert not (settings.data_dir / "sync-request").exists()
 
 
 def git(root, *args):

@@ -40,7 +40,7 @@ def decoded_body(handler):
 @pytest.fixture
 def fake_s3(tmp_path, monkeypatch):
     """Serve objects read-only; PUT succeeds only under notes/AI_Drafts/."""
-    objects, writes = {}, []
+    objects, writes, reads = {}, [], []
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -72,7 +72,10 @@ def fake_s3(tmp_path, monkeypatch):
         def do_GET(self, head=False):
             url = urlparse(self.path)
             key = unquote(url.path).removeprefix("/bucket/")
-            if url.path.rstrip("/") == "/bucket":
+            # Billed requests: LIST (bucket) or HEAD/GET of an existing object.
+            listing = url.path.rstrip("/") == "/bucket"
+            reads.append(("LIST", "") if listing else ("HEAD" if head else "GET", key))
+            if listing:
                 query = parse_qs(url.query)
                 prefix = query.get("prefix", [""])[0]
                 contents = "".join(
@@ -122,7 +125,7 @@ def fake_s3(tmp_path, monkeypatch):
     cfg.write_text("[notes]\n" + remote + "\n[drafts]\n" + remote)
     monkeypatch.setenv("RCLONE_CONFIG", str(cfg))
     try:
-        yield objects, writes
+        yield objects, writes, reads
     finally:
         server.shutdown()
         server.server_close()
@@ -131,7 +134,7 @@ def fake_s3(tmp_path, monkeypatch):
 
 @pytest.mark.skipif(not shutil.which("rclone"), reason="rclone is installed in the Linux test image")
 def test_real_rclone_s3_download_never_writes(store, tmp_path, fake_s3):
-    objects, writes = fake_s3
+    objects, writes, _ = fake_s3
     objects.update({"notes/a.md": "# 실제 S3 다운로드\n검증 노트".encode(), "notes/_Template/excluded.md": b"skip"})
     output = io.BytesIO()
     Image.new("RGB", (20, 10), "blue").save(output, format="PNG")
@@ -153,7 +156,7 @@ def test_real_rclone_s3_download_never_writes(store, tmp_path, fake_s3):
 
 @pytest.mark.skipif(not shutil.which("rclone"), reason="rclone is installed in the Linux test image")
 def test_real_rclone_draft_upload_writes_only_new_draft(store, fake_s3):
-    objects, writes = fake_s3
+    objects, writes, _ = fake_s3
     objects["notes/a.md"] = b"# source"
     store.settings.source_sync = {"enabled": False, "remote": "notes:bucket/notes"}
     store.settings.drafts = {"enabled": True, "remote": "drafts:bucket/notes"}
@@ -169,3 +172,30 @@ def test_real_rclone_draft_upload_writes_only_new_draft(store, fake_s3):
     DraftUpload(store).process()
     assert drafts.queue_draft(again)["code"] == "already_exists"
     assert len(writes) == 1 and objects["notes/a.md"] == b"# source"
+
+
+@pytest.mark.skipif(not shutil.which("rclone"), reason="rclone is installed in the Linux test image")
+def test_real_rclone_unchanged_cycle_sends_one_list_and_no_object_requests(store, tmp_path, fake_s3):
+    objects, writes, reads = fake_s3
+    for i in range(30):
+        objects[f"notes/folder{i}/note{i}.md"] = f"# note {i}".encode()
+    output = io.BytesIO()
+    Image.new("RGB", (4, 4), "red").save(output, format="PNG")
+    objects["notes/_Attachments/image.png"] = output.getvalue()
+    store.settings.snapshot_dir = tmp_path / "snapshots"
+    store.settings.source_sync = {"enabled": True, "remote": "notes:bucket/notes"}
+    cache = {}
+    SourceSync(store, cache).once()
+    ImageSync(store, cache).once()
+    reads.clear()
+    cache = {}
+    SourceSync(store, cache).once()
+    ImageSync(store, cache).once()
+    # One flat listing for 31 objects in 31 folders; no HEAD/GET per object.
+    assert [r for r in reads if r[0] == "LIST"] == [("LIST", "")]
+    assert not [r for r in reads if r[0] != "LIST" and r[1] in objects]
+    reads.clear()
+    objects["notes/folder0/note0.md"] = b"# changed"
+    SourceSync(store).once()
+    assert [r for r in reads if r[0] == "GET" and r[1] in objects] == [("GET", "notes/folder0/note0.md")]
+    assert not writes

@@ -49,13 +49,23 @@ config.toml:
     [source_sync]
     enabled = true
     remote = "notes:BUCKET/PREFIX"
+    interval_seconds = 1800      # 정기 동기화 주기 (기본 30분)
+    on_demand_min_seconds = 300  # MCP 호출 시 동기화 최소 간격 (기본 5분)
 
 worker는 lsjson과 원격→서버 copyto만 실행합니다. 서버 사본은 런타임 캐시이며 source_root 원본을 수정하는 기능이 아닙니다.
-Markdown은 5분마다 목록을 확인하고 변경분만 내려받습니다. HTML/PDF는 연결된 문서 조회 요청이 들어오면 다운로드합니다.
+Markdown은 30분마다, 그리고 MCP 도구가 호출되면 목록을 확인해 변경분만 내려받습니다.
+MCP 호출에 따른 동기화는 마지막 동기화 후 `on_demand_min_seconds`(기본 5분)가 지나야 실행되며,
+응답은 기다리지 않고 현재 사본으로 반환합니다. 방금 수정한 노트는 다음 호출부터 반영됩니다. HTML/PDF는 연결된 문서 조회 요청이 들어오면 다운로드합니다.
 첨부 최초 응답은 pending일 수 있으므로 수 초 뒤 다시 호출합니다.
 
+S3 요청 비용: S3는 데이터 양과 별도로 요청 건수에 과금합니다(LIST 1천 건당 약 $0.005, GET/HEAD 1천 건당 약 $0.0004).
+worker는 한 사이클에 vault 목록을 `--fast-list --no-mimetype --use-server-modtime`으로 한 번만 받아
+원문·이미지 동기화가 함께 사용합니다. 객체 1천 개당 LIST 1건이며 객체별 HEAD 요청은 보내지 않습니다.
+변경을 내려받은 사이클에서만 목록을 한 번 더 확인합니다. 첨부는 해당 폴더 목록만 조회합니다.
+변경 판정은 크기와 S3 LastModified로 하므로, 이 방식으로 처음 배포한 직후 한 번은 전체 Markdown·이미지를 다시 내려받습니다.
+
 `wiki.config.json`의 `attachments_dir`(보통 `_Attachments`) 아래 PNG·JPEG·WebP·GIF는
-5분마다 별도로 동기화합니다. `exclude` 규칙을 적용하며 원격으로 업로드하거나 삭제하지 않습니다.
+원문과 같은 사이클에서 동기화합니다. `exclude` 규칙을 적용하며 원격으로 업로드하거나 삭제하지 않습니다.
 이미지는 `/sources/images/` 아래 원문 상대 경로로 보관하고, 목록·해시는 `/sources/images.json`에 기록합니다.
 노트 스냅샷에는 이미지를 복사하지 않습니다. HTML/PDF의 요청 시 다운로드 방식은 유지합니다.
 정상 동기화 후 원격에서 삭제되거나 제외된 이미지의 서버 사본도 삭제합니다.
@@ -104,7 +114,7 @@ config.toml:
 
 `drafts.remote`가 `source_sync.remote`와 같은 rclone remote 이름이면 거부합니다.
 MCP 서버는 요청을 `DATA_DIR/draft-uploads`에 기록하고, sync worker의 별도 스레드가 2초 간격으로 업로드합니다.
-5분 주기의 원문·이미지·Git 동기화가 진행 중이어도 기다리지 않습니다. 결과는 7일간 보관합니다.
+원문·이미지·Git 동기화가 진행 중이어도 기다리지 않습니다. 결과는 7일간 보관합니다.
 업로드 직전 원격 목록을 확인해 대소문자·한글 정규화(NFC/NFD)를 무시하고 같은 이름이 있으면 거부합니다.
 S3에는 원자적 "없을 때만 생성"이 없으므로 확인과 업로드 사이에 PC에서 같은 이름을 올리면 `upload_unverified`로 보고합니다.
 대기 중 요청은 20개로 제한합니다. 실패한 요청은 새 request_id로 다시 보냅니다.

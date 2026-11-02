@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from .config import Settings, fold, relative_path
 from .knowledge import SECRET, note_path
 from .storage import Store, atomic_write, digest, now, split_frontmatter
-from .sync import CommandFailure, SyncValidationError, named_remote, rclone
+from .sync import LIST_FLAGS, CommandFailure, SyncValidationError, named_remote, rclone
 
 MAX_PENDING = 20
 RESULT_DAYS = 7
@@ -118,7 +118,7 @@ class DraftUpload(Drafts):
 
     def existing(self, root: str) -> dict[str, int]:
         try:
-            records = json.loads(self.command("lsjson", root, "--recursive", "--files-only"))
+            records = json.loads(self.command("lsjson", root, "--recursive", *LIST_FLAGS))
         except CommandFailure as exc:
             if exc.returncode == 3:  # Directory not found: no drafts yet.
                 return {}
